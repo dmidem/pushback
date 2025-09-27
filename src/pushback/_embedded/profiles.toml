@@ -1,0 +1,159 @@
+# Default profiles
+# This will be copied to ~/.config/pushback/profiles.toml on first run
+
+[profile.vcs]
+always = true
+notes  = "Version control metadata"
+ignore = [".git/", ".svn/", ".hg/"]
+
+[profile.safe_defaults]
+always = true
+notes  = "OS/editor trash & transient files"
+ignore = [
+  ".DS_Store", ".AppleDouble", ".LSOverride", "._*", ".Spotlight-V100/", ".fseventsd/",
+  "Thumbs.db", "Desktop.ini", "$RECYCLE.BIN/", "System Volume Information/", "lost+found/",
+  "*~", "#*#", ".#*", "*.swp", "*.swo", "*.tmp", "*.temp", "*.bak", "*.orig", "*.rej",
+  ".cache/", ".Trash*/", ".thumbnails/",
+]
+
+[profile.node]
+notes  = "Node.js / JS / TS"
+detect.any_of = ["package.json","yarn.lock","pnpm-lock.yaml","bun.lockb"]
+ignore = ["node_modules/", ".npm/", ".pnpm-store/", ".yarn/", ".turbo/"]
+
+[profile.python]
+notes  = "Python"
+detect.any_of = ["pyproject.toml","requirements.txt","Pipfile","environment.yml","setup.cfg","setup.py"]
+ignore = [
+  "__pycache__/", "*.pyc", ".mypy_cache/", ".pytest_cache/", ".tox/", ".eggs/", ".ruff_cache/",
+  ".venv/", "venv/", "env/", "build/", "dist/",
+]
+
+[profile.rust]
+notes  = "Rust / Cargo"
+detect.any_of = ["Cargo.toml"]
+ignore = ["target/", ".cargo/registry/", ".cargo/git/"]
+
+[profile.go]
+notes  = "Go"
+detect.any_of = ["go.mod"]
+ignore = ["bin/", "pkg/"]
+
+[profile.java_maven]
+notes  = "Java / Maven"
+detect.any_of = ["pom.xml"]
+ignore = ["target/"]
+
+[profile.java_gradle]
+notes  = "Java / Gradle"
+detect.any_of = ["build.gradle","settings.gradle","build.gradle.kts","gradlew","gradlew.bat"]
+ignore = ["build/", ".gradle/"]
+
+[profile.kotlin]
+notes  = "Kotlin (Gradle)"
+detect.any_of = ["*.kt","*.kts"]
+ignore = []
+
+[profile.dotnet]
+notes  = ".NET / C# / F#"
+detect.any_of = ["*.sln","*.csproj","*.fsproj","*.vbproj"]
+ignore = ["bin/", "obj/"]
+
+[profile.cpp]
+notes  = "C / C++ (generic)"
+detect.any_of = ["CMakeLists.txt","Makefile"]
+ignore = ["build/", "out/", "*.o", "*.a", "*.so", "*.obj", "*.dll", "*.exe"]
+
+[profile.swiftpm]
+notes  = "SwiftPM"
+detect.any_of = ["Package.swift"]
+ignore = [".build/"]
+
+[profile.xcode_ios]
+notes  = "Xcode projects"
+detect.any_of = ["*.xcodeproj","*.xcworkspace"]
+ignore = ["DerivedData/", "*.xcuserstate", "*.xcuserdata/"]
+
+[profile.android_sdk]
+notes  = "Android NDK/SDK caches"
+detect.any_of = ["local.properties"]
+ignore = [".cxx/", ".externalNativeBuild/"]
+
+[profile.haskell]
+notes  = "Haskell / Stack / Cabal"
+detect.any_of = ["stack.yaml","cabal.project"]
+ignore = [".stack-work/", "dist-newstyle/"]
+
+[profile.elm]
+notes  = "Elm"
+detect.any_of = ["elm.json"]
+ignore = ["elm-stuff/"]
+
+[profile.sphinx_docs]
+notes  = "Sphinx docs"
+detect.any_of = ["conf.py","docs/conf.py","source/conf.py"]
+ignore = ["_build/"]
+
+[profile.hugo]
+notes  = "Hugo"
+detect.any_of = ["config.toml","hugo.toml","config.yaml","config.yml"]
+ignore = ["public/"]
+
+[profile.jekyll]
+notes  = "Jekyll"
+detect.any_of = ["_config.yml"]
+ignore = ["_site/"]
+
+[profile.jupyter]
+notes  = "Jupyter / IPython"
+detect.any_of = ["*.ipynb",".ipynb_checkpoints/"]
+ignore = [".ipynb_checkpoints/"]
+
+[profile.r_lang]
+notes  = "R / RStudio"
+detect.any_of = ["*.Rproj","renv.lock","DESCRIPTION"]
+ignore = [".Rproj.user/", ".Rhistory", ".RData", ".Rapp.history", "renv/library/"]
+
+[profile.matlab]
+notes  = "MATLAB"
+detect.any_of = ["*.mat","*.m","*.mlx","*.slx"]
+ignore = ["slprj/", "*.mex*", "*.asv"]
+
+[profile.unity]
+notes  = "Unity"
+detect.any_of = ["ProjectSettings/ProjectVersion.txt","Assets/"]
+ignore = ["Library/", "Temp/", "Obj/", "Build/", "Builds/", "Logs/"]
+
+[profile.unreal]
+notes  = "Unreal Engine"
+detect.any_of = ["*.uproject"]
+ignore = ["Binaries/", "DerivedDataCache/", "Intermediate/", "Saved/"]
+
+[profile.latex]
+notes  = "LaTeX intermediates"
+detect.any_of = ["*.tex"]
+ignore = [
+  "*.aux","*.bbl","*.blg","*.brf","*.lof","*.log","*.lot","*.fls","*.fdb_latexmk",
+  "*.synctex.gz","*.toc","*.out","*.nav","*.snm",
+]
+
+[profile.office_temp]
+notes  = "Office temp"
+detect.any_of = ["*.doc","*.docx","*.xls","*.xlsx","*.ppt","*.pptx","*.odt","*.ods","*.odp"]
+ignore = ["~$*.*"]
+
+[profile.blender]
+notes  = "Blender"
+detect.any_of = ["*.blend"]
+ignore = ["*.blend1", "*.blend2", "*.blend@", "__pycache__/"]
+
+[profile.terraform]
+notes  = "Terraform (state files!)"
+detect.any_of = ["*.tf","*.tf.json",".terraform/"]
+ignore = [".terraform/", "*.tfstate", "*.tfstate.backup"]
+
+[profile.django]
+notes  = "Django (CAUTION: db.sqlite3)"
+detect.any_of = ["manage.py"]
+ignore = ["db.sqlite3"]
+

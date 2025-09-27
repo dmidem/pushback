@@ -1,0 +1,19 @@
+# Default pushback configuration
+# This will be copied to ~/.config/pushback/config.toml on first run
+
+[options]
+delete_remote = false
+profiles_file = "~/.config/pushback/profiles.toml"
+snapshot_mode = "none"
+snapshot_custom_hours = 24
+include_backupignore = true
+include_gitignore = false
+autodetect_profiles = true
+
+[[server]]
+name = "main"
+user = "your_user"
+host = "your.host.example"
+port = 22
+base = "~/pushback"
+default = true
