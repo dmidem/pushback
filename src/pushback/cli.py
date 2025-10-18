@@ -9,11 +9,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from pushback.config import Config
+from pushback.config import Config, ServerEntry, SyncParams
 from pushback.remote import RemoteManager
 from pushback.sync import sync_to_server
 
-PROG_NAME = "pushback"
+from . import APP_NAME, __version__
 
 HELP_EPILOG = f"""
 REQUIREMENTS
@@ -21,9 +21,9 @@ REQUIREMENTS
   Remote: standard POSIX tools (ls, xargs, basename)
 
 CONFIG
-  Default: ~/.config/pushback/config.toml
-  Profiles: ~/.config/pushback/profiles.toml
-  Create:   {PROG_NAME} --init-config
+  Default: ~/.config/{APP_NAME}/config.toml
+  Profiles: ~/.config/{APP_NAME}/profiles.toml
+  Create:   {APP_NAME} --init-config
 
 MULTIPLE SERVERS
   Define servers in config.toml:
@@ -33,7 +33,7 @@ MULTIPLE SERVERS
     user = "user1"
     host = "host1.example.com"
     port = 22
-    base = "~/pushback"
+    base = "~/{APP_NAME}"
     default = true
 
     [[server]]
@@ -45,9 +45,9 @@ MULTIPLE SERVERS
     default = false
 
   Usage:
-    pushback .                    # Uses all default servers
-    pushback --server backup .    # Uses only 'backup'
-    pushback --server main,backup .  # Uses both
+    {APP_NAME} . # Uses all default servers
+    {APP_NAME} --server backup . # Uses only 'backup'
+    {APP_NAME} --server main,backup . # Uses both
 
 IGNORE RULES
   Uses filters with gitignore semantics:
@@ -56,22 +56,22 @@ IGNORE RULES
 
 SIZE FILTERING
   Use rsync's native size filters:
-    --max-size 100M    # Skip files larger than 100M
-    --min-size 1K      # Skip files smaller than 1K
+    --max-size 100M # Skip files larger than 100M
+    --min-size 1K # Skip files smaller than 1K
 
 EXAMPLES
-  • Simple backup:         {PROG_NAME} .
-  • Preview changes:       {PROG_NAME} --dry-run .
-  • Skip large files:      {PROG_NAME} --max-size 500M .
-  • Multiple servers:      {PROG_NAME} --server main,backup .
-  • Daily snapshots:       {PROG_NAME} --snapshot-mode daily ~/project
+  • Simple backup:         {APP_NAME} .
+  • Preview changes:       {APP_NAME} --dry-run .
+  • Skip large files:      {APP_NAME} --max-size 500M .
+  • Multiple servers:      {APP_NAME} --server main,backup .
+  • Daily snapshots:       {APP_NAME} --snapshot-mode daily ~/project
 """
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build argument parser"""
     parser = argparse.ArgumentParser(
-        prog=PROG_NAME,
+        prog=APP_NAME,
         description="Backup/sync a project folder to remote server(s) using rsync over SSH.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog=HELP_EPILOG,
@@ -81,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--config",
         type=str,
         default=None,
-        help="Path to config file (default: ~/.config/pushback/config.toml)",
+        help=f"Path to config file (default: ~/.config/{APP_NAME}/config.toml)",
     )
     parser.add_argument("--init-config", action="store_true", help="Create template config file")
     parser.add_argument(
@@ -91,46 +91,51 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--list-servers", action="store_true", help="List configured servers")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
+    parser.add_argument("--version", action="store_true", help="Print version number and exit")
     parser.add_argument(
         "--no-multiplex", action="store_true", help="Disable SSH connection sharing"
     )
 
-    # Delete behavior
-    parser.add_argument(
+    delete_group = parser.add_mutually_exclusive_group()
+    delete_group.add_argument(
         "-d",
         "--delete",
         action="store_true",
         help="Delete remote files not present locally",
     )
-    parser.add_argument("--no-delete", action="store_true", help="Disable deletion")
+    delete_group.add_argument("--no-delete", action="store_true", help="Disable deletion")
 
-    # Filter options
-    parser.add_argument(
+    backupignore_group = parser.add_mutually_exclusive_group()
+    backupignore_group.add_argument(
         "--include-backupignore",
         action="store_true",
         help="Include .backupignore rules (overrides config)",
     )
-    parser.add_argument(
+    backupignore_group.add_argument(
         "--no-backupignore",
         action="store_true",
         help="Exclude .backupignore rules (overrides config)",
     )
-    parser.add_argument(
+
+    gitignore_group = parser.add_mutually_exclusive_group()
+    gitignore_group.add_argument(
         "--include-gitignore",
         action="store_true",
         help="Include .gitignore rules (overrides config)",
     )
-    parser.add_argument(
+    gitignore_group.add_argument(
         "--no-gitignore",
         action="store_true",
         help="Exclude .gitignore rules (overrides config)",
     )
-    parser.add_argument(
+
+    autodetect_group = parser.add_mutually_exclusive_group()
+    autodetect_group.add_argument(
         "--autodetect-profiles",
         action="store_true",
         help="Auto-detect project type (overrides config)",
     )
-    parser.add_argument(
+    autodetect_group.add_argument(
         "--no-autodetect",
         action="store_true",
         help="Disable profile auto-detection (overrides config)",
@@ -187,116 +192,124 @@ def main():
         parser.print_help(sys.stderr)
         return 2
 
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args()
+    except SystemExit as exc:
+        return exc.code
 
-    # Load configuration
+    if args.version:
+        print(f"{APP_NAME} v{__version__}")
+        return 0
+
+    # Load/initialise configuration
     config = Config(args.config)
 
-    # Handle --init-config
     if args.init_config:
         config.create_default(force=args.force_all)
         return 0
 
-    # Validate config exists
-    if not config.exists():
-        print(f"Error: config file not found: {config.path}", file=sys.stderr)
-        print(f"Run `{PROG_NAME} --init-config` to create one.", file=sys.stderr)
-        return 2
-
-    # Load config
     try:
         config.load()
-    except Exception as e:
-        print(f"Error loading config: {e}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error loading config: {exc}", file=sys.stderr)
         return 2
 
-    # Handle --list-servers
     if args.list_servers:
         config.list_servers()
         return 0
 
-    # Select servers
     selected_servers = config.select_servers(args.server)
     if not selected_servers:
         return 2
 
-    # Handle --list-remote
+    remote_mgr = RemoteManager(not args.no_multiplex)
+
     if args.list_remote is not None:
-        remote_mgr = RemoteManager(not args.no_multiplex)
         name_filter = args.list_remote or ""
         overall_rc = 0
-        first = True
-
-        for server_name, server_config in selected_servers.items():
-            if len(selected_servers) > 1 and not first:
+        for idx, (server_name, server_config) in enumerate(selected_servers.items()):
+            if idx > 0:
                 print()
-            first = False
-
-            rc = remote_mgr.list_backups(server_name, server_config, name_filter)
+            try:
+                items = remote_mgr.list_backups(server_name, server_config, name_filter)
+                if not items:
+                    print(f"(no backups found on {server_name})")
+                else:
+                    filter_text = f" (filtered by {name_filter})" if name_filter else ""
+                    print(f"Backups on {server_name} {filter_text}:")
+                    for item in sorted(items):
+                        print("  -", item)
+            except Exception as exc:  # noqa: BLE001
+                print(f"Error listing backups on {server_name}: {exc}", file=sys.stderr)
+                rc = 2
             if rc != 0:
                 overall_rc = rc
-
         return overall_rc
 
-    # Sync mode requires PROJECT_PATH
-    if not args.PROJECT_PATH:
-        print("Error: PROJECT_PATH is required", file=sys.stderr)
-        parser.print_help(sys.stderr)
-        return 2
+    require_project = not args.list_remote
+    if require_project and args.PROJECT_PATH is None:
+        parser.error("PROJECT_PATH is required unless --list-remote is used")
 
-    root = Path(args.PROJECT_PATH).expanduser().resolve()
+    root_input = args.PROJECT_PATH or "."
+    root = Path(root_input).expanduser().resolve()
     if not root.exists() or not root.is_dir():
         print(f"Error: not a directory: {root}", file=sys.stderr)
         return 2
 
-    # Prepare sync parameters
     sync_params = config.prepare_sync_params(root, args)
 
     if args.verbose:
-        print(f"Config:         {config.path}")
-        print(f"Profiles:       {config.profiles_path}")
-        print(f"Project:        {sync_params['folder_name']}")
-        print(f"Path:           {sync_params['canonical_path']}")
-        print(f"Snapshot mode:  {sync_params['snapshot_mode']}")
-        if sync_params["snapshot_mode"] == "custom":
-            print(f"Custom hours:   {sync_params['snapshot_custom_hours']}")
-        print(f"Servers:        {', '.join(selected_servers.keys())}")
-        print()
+        _print_verbose_summary(config, sync_params, selected_servers)
 
-    # Sync to all selected servers
+    successes: list[str] = []
+    failures: list[str] = []
     overall_success = True
-    successes, failures = [], []
 
-    for server_name, server_config in selected_servers.items():
-        if len(selected_servers) > 1 and args.verbose:
+    for idx, (server_name, server_config) in enumerate(selected_servers.items()):
+        if idx > 0 and args.verbose:
             print(f"\n{'=' * 50}")
-
         result = sync_to_server(
             server_name,
             server_config,
             sync_params,
             args,
             config,
+            remote_mgr=remote_mgr,
         )
-
         if result == 0:
             successes.append(server_name)
-        else:
-            failures.append(server_name)
-            overall_success = False
-            if not args.force_all:
-                break
+            continue
 
-    # Report results
+        failures.append(server_name)
+        overall_success = False
+        if not args.force_all:
+            break
+
     if overall_success:
         if len(selected_servers) > 1:
             print(f"\nAll backups completed: {', '.join(successes)}")
         return 0
 
-    if len(selected_servers) > 1:
-        if successes:
-            print(f"\nSucceeded: {', '.join(successes)}")
-        if failures:
-            print(f"Failed: {', '.join(failures)}", file=sys.stderr)
+    if len(selected_servers) > 1 and successes:
+        print(f"\nSucceeded: {', '.join(successes)}")
+    if failures:
+        print(f"Failed: {', '.join(failures)}", file=sys.stderr)
 
     return 1
+
+
+def _print_verbose_summary(
+    config: Config,
+    sync_params: SyncParams,
+    selected_servers: dict[str, ServerEntry],
+) -> None:
+    """Print an overview before syncing."""
+    print(f"Config:         {config.path}")
+    print(f"Profiles:       {config.profiles_path}")
+    print(f"Project:        {sync_params.folder_name}")
+    print(f"Path:           {sync_params.canonical_path}")
+    print(f"Snapshot mode:  {sync_params.snapshot_mode}")
+    if sync_params.snapshot_mode == "custom":
+        print(f"Custom hours:   {sync_params.snapshot_custom_hours}")
+    print(f"Servers:        {', '.join(selected_servers.keys())}")
+    print()

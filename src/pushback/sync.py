@@ -1,14 +1,22 @@
 """Rsync synchronization operations."""
 
+import os
+import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .filter import build_merge_filter
 from .remote import RemoteManager
+
+if TYPE_CHECKING:
+    from pushback.config import SyncParams
 
 
 @dataclass
@@ -42,46 +50,65 @@ class SyncContext:
         return f"{self.remote.base.rstrip('/')}/{self.base_remote_name}{self.time_suffix}"
 
 
-def sync_to_server(server_name: str, server_config: dict, sync_params: dict, args, config) -> int:
+_RSYNC_BINARY = None
+
+
+def find_best_rsync() -> str:
+    """
+    Find the best rsync binary to use.
+    On macOS, prefer Homebrew's GNU rsync over system openrsync.
+    """
+    candidates = [
+        "/opt/homebrew/bin/rsync",
+        "/usr/local/bin/rsync",
+        shutil.which("rsync"),
+    ]
+
+    for exe in candidates:
+        if not exe:
+            continue
+        try:
+            out = subprocess.check_output([exe, "--version"], text=True, errors="ignore")
+        except Exception:
+            continue
+        if "openrsync" not in out.lower():
+            return exe
+
+    # Fall back to whatever is available (may be openrsync)
+    return shutil.which("rsync") or "rsync"
+
+
+def get_rsync_binary() -> str:
+    """Get the rsync binary path to use."""
+    global _RSYNC_BINARY
+    if _RSYNC_BINARY is None:
+        _RSYNC_BINARY = find_best_rsync()
+    return _RSYNC_BINARY
+
+
+def sync_to_server(
+    server_name: str,
+    server_config,
+    sync_params: "SyncParams",
+    args,
+    config,
+    remote_mgr: RemoteManager | None = None,
+) -> int:
     """Sync project to a single server"""
-    # Extract and validate remote config
-    remote_user = server_config.get("user")
-    remote_host = server_config.get("host")
-    remote_port = server_config.get("port", 22)
-    remote_base = server_config.get("base")
-
-    # Type guard: ensure all values are strings and not None
-    if (
-        not isinstance(remote_user, str)
-        or not isinstance(remote_host, str)
-        or not isinstance(remote_base, str)
-        or not isinstance(remote_port, int)
-    ):
-        print(
-            f"Error: server '{server_name}' has missing or incorrect base, user, host, or port",
-            file=sys.stderr,
-        )
-        return 2
-
     try:
-        port_int = int(remote_port)
-    except ValueError:
-        print(f"Error: invalid port '{remote_port}'", file=sys.stderr)
+        remote_config = _to_remote_config(server_name, server_config)
+    except (TypeError, ValueError) as exc:
+        print(exc, file=sys.stderr)
         return 2
 
-    # Build sync context - now type checker knows these are strings
-    remote_config = RemoteConfig(
-        user=remote_user, host=remote_host, port=port_int, base=remote_base
-    )
-
-    remote_mgr = RemoteManager(not args.no_multiplex)
+    remote_mgr = remote_mgr or RemoteManager(not args.no_multiplex)
 
     ctx = SyncContext(
-        root=sync_params["root"],
-        folder_name=sync_params["folder_name"],
-        suffix=sync_params["suffix"],
-        time_suffix=sync_params["time_suffix"],
-        snapshot_mode=sync_params["snapshot_mode"],
+        root=sync_params.root,
+        folder_name=sync_params.folder_name,
+        suffix=sync_params.suffix,
+        time_suffix=sync_params.time_suffix,
+        snapshot_mode=sync_params.snapshot_mode,
         remote=remote_config,
         remote_mgr=remote_mgr,
     )
@@ -91,18 +118,25 @@ def sync_to_server(server_name: str, server_config: dict, sync_params: dict, arg
         print(f"Remote: {ctx.remote.user}@{ctx.remote.host}:{ctx.remote.port}")
         print(f"Target: {ctx.exact_remote_dir}")
 
-    if not ctx.remote_mgr.test_dir(
-        ctx.remote.user,
-        ctx.remote.host,
-        ctx.remote.port,
-        ctx.remote.base,
-    ):
-        print(f"Error: remote base does not exist: {ctx.remote.base}", file=sys.stderr)
+    try:
+        if not ctx.remote_mgr.test_dir(
+            ctx.remote.user,
+            ctx.remote.host,
+            ctx.remote.port,
+            ctx.remote.base,
+        ):
+            raise RuntimeError(f"remote base does not exist on {server_name}: {ctx.remote.base}")
+    except Exception as exc:
+        print(f"Error testing remote directory: {exc}", file=sys.stderr)
         return 2
 
-    target_remote_dir = _determine_target_dir(ctx, args)
-    if target_remote_dir is None:
-        return 1
+    try:
+        target_remote_dir = _determine_target_dir(ctx, args)
+        if target_remote_dir is None:
+            return 1
+    except Exception as exc:
+        print(f"Error determining target directory: {exc}", file=sys.stderr)
+        return 2
 
     filter_path = _build_filter(ctx.root, config, args, args.verbose)
     if filter_path is None:
@@ -115,13 +149,51 @@ def sync_to_server(server_name: str, server_config: dict, sync_params: dict, arg
             action = "Dry-run" if args.dry_run else "Backup"
             print(f"\n{action} complete for {server_name}.")
             if not args.dry_run:
-                print(f"   {ctx.remote.user}@{ctx.remote.host}:{target_remote_dir}")
+                print(f"   {ctx.remote.user}@{ctx.remote.host}:{target_remote_dir.rstrip('/')}/")
         else:
             print(f"\nrsync failed for {server_name} with exit code {return_code}", file=sys.stderr)
 
         return return_code
     finally:
         Path(filter_path).unlink(missing_ok=True)
+
+
+def _to_remote_config(server_name: str, server_config) -> RemoteConfig:
+    """Normalise various server representations to RemoteConfig."""
+    if isinstance(server_config, RemoteConfig):
+        return server_config
+
+    if hasattr(server_config, "user"):
+        user = getattr(server_config, "user")
+        host = getattr(server_config, "host")
+        base = getattr(server_config, "base")
+        port = getattr(server_config, "port", 22)
+    elif isinstance(server_config, Mapping):
+        try:
+            user = server_config["user"]
+            host = server_config["host"]
+            base = server_config["base"]
+        except KeyError as exc:
+            raise ValueError(
+                f"Error: server '{server_name}' missing field '{exc.args[0]}'"
+            ) from None
+        port = server_config.get("port", 22)
+    else:
+        raise TypeError(
+            f"Unsupported server configuration type for '{server_name}': {type(server_config)!r}"
+        )
+
+    try:
+        port_int = int(port)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Error: invalid port '{port}' for server '{server_name}'") from exc
+
+    return RemoteConfig(
+        user=str(user),
+        host=str(host),
+        port=port_int,
+        base=str(base),
+    )
 
 
 def _determine_target_dir(ctx: SyncContext, args) -> str | None:
@@ -202,7 +274,6 @@ def _build_filter(root: Path, config, args, verbose: bool) -> str | None:
     if verbose:
         print(f"Loading profiles: {profiles_path}")
 
-    # Determine filter settings (CLI overrides config)
     include_backupignore = config.options["include_backupignore"]
     if args.include_backupignore:
         include_backupignore = True
@@ -241,8 +312,8 @@ def _build_filter(root: Path, config, args, verbose: bool) -> str | None:
         print(f"Error: profiles file not found: {profiles_path}", file=sys.stderr)
         print("Create it or set profiles_file in config", file=sys.stderr)
         return None
-    except Exception as e:
-        print(f"Error loading profiles: {e}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error loading profiles: {exc}", file=sys.stderr)
         return None
 
     filter_content = "\n".join(filter_rules) + "\n" if filter_rules else ""
@@ -253,27 +324,45 @@ def _build_filter(root: Path, config, args, verbose: bool) -> str | None:
             delete=False,
             suffix=".filter",
             encoding="utf-8",
-        ) as f:
-            f.write(filter_content)
+        ) as handle:
+            handle.write(filter_content)
             if verbose:
                 print(f"Generated filter: {len(filter_rules)} rules")
-            return f.name
-    except OSError as e:
-        print(f"Error creating filter file: {e}", file=sys.stderr)
+            return handle.name
+    except OSError as exc:
+        print(f"Error creating filter file: {exc}", file=sys.stderr)
         return None
+
+
+def rsync_friendly_path(path: Path) -> str:
+    """Convert a local Path into something rsync on POSIX understands."""
+    result = str(path)
+    if os.name == "nt":
+        result = result.replace("\\", "/")
+        match = re.match(r"^([A-Za-z]):/(.*)$", result)
+        if match:
+            drive = match.group(1).lower()
+            result = f"/cygdrive/{drive}/{match.group(2)}"
+    return result
 
 
 def _run_rsync(ctx: SyncContext, target: str, filter_path: str, args, config) -> int:
     """Run rsync command"""
-    src = str(ctx.root) + "/"
-    ssh_opts = " ".join(ctx.remote_mgr.ssh_opts(ctx.remote.port))
+    src = _ensure_trailing_slash(rsync_friendly_path(Path(ctx.root)))
+    dest_path = _ensure_trailing_slash(target)
+    dest = f"{ctx.remote.user}@{ctx.remote.host}:{dest_path}"
+    filt = rsync_friendly_path(Path(filter_path))
+    ssh_opts = shlex.join(ctx.remote_mgr.ssh_opts(ctx.remote.port))
+
+    rsync = get_rsync_binary()
 
     rsync_cmd = [
-        "rsync",
+        rsync,
         "-azP",
         "--safe-links",
         "--prune-empty-dirs",
-        f"--filter=merge {filter_path}",
+        "--filter",
+        f"merge {filt}",
         "-e",
         f"ssh {ssh_opts}",
     ]
@@ -285,7 +374,7 @@ def _run_rsync(ctx: SyncContext, target: str, filter_path: str, args, config) ->
         delete_remote = False
 
     if delete_remote:
-        rsync_cmd.insert(2, "--delete")
+        rsync_cmd.insert(1, "--delete")
 
     if args.max_size:
         rsync_cmd.append(f"--max-size={args.max_size}")
@@ -300,14 +389,16 @@ def _run_rsync(ctx: SyncContext, target: str, filter_path: str, args, config) ->
     if args.rsync_extra.strip():
         try:
             extra_tokens = [
-                t for t in shlex.split(args.rsync_extra) if t != "-e" and not t.startswith("-e")
+                token
+                for token in shlex.split(args.rsync_extra)
+                if token != "-e" and not token.startswith("-e")
             ]
             rsync_cmd.extend(extra_tokens)
-        except ValueError as e:
-            print(f"Error parsing rsync-extra: {e}", file=sys.stderr)
+        except ValueError as exc:
+            print(f"Error parsing rsync-extra: {exc}", file=sys.stderr)
             return 2
 
-    rsync_cmd.extend([src, f"{ctx.remote.user}@{ctx.remote.host}:{target}/"])
+    rsync_cmd.extend([src, dest])
 
     if args.verbose:
         print("Running rsync:")
@@ -319,6 +410,11 @@ def _run_rsync(ctx: SyncContext, target: str, filter_path: str, args, config) ->
     except KeyboardInterrupt:
         print("\nInterrupted by user", file=sys.stderr)
         return 130
-    except Exception as e:
-        print(f"Error running rsync: {e}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error running rsync: {exc}", file=sys.stderr)
         return 1
+
+
+def _ensure_trailing_slash(value: str) -> str:
+    """Ensure exactly one trailing slash."""
+    return value.rstrip("/") + "/"

@@ -1,0 +1,15 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    uses: ./.github/workflows/common-build.yml
+    with:
+      python-versions: '["3.11", "latest"]'
+      oses: '["ubuntu-latest", "macos-latest", "windows-latest"]'
+      upload-artifacts: false

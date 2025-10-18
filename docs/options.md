@@ -110,10 +110,10 @@ Controls time-based snapshot directories:
 
 | Mode      | Directory Suffix | Description                    | Example              |
 |-----------|------------------|--------------------------------|----------------------|
-| `none`    | `_hash`          | Single directory, update only  | `myproject_a1b2c3d4` |
-| `hourly`  | `_YYYY-MM-DDHHH` | One snapshot per hour          | `myproject_2025-01-15H14` |
+| `none`    | —                | Single directory, update only  | `myproject_a1b2c3d4` |
+| `hourly`  | `_YYYY-MM-DDHhh` | One snapshot per hour          | `myproject_2025-01-15H14` |
 | `daily`   | `_YYYY-MM-DD`    | One snapshot per day           | `myproject_2025-01-15` |
-| `weekly`  | `_YYYYWWW`       | One snapshot per ISO week      | `myproject_2025W03`  |
+| `weekly`  | `_YYYYWww`       | One snapshot per ISO week      | `myproject_2025W03`  |
 | `monthly` | `_YYYY-MM`       | One snapshot per month         | `myproject_2025-01`  |
 | `yearly`  | `_YYYY`          | One snapshot per year          | `myproject_2025`     |
 | `custom`  | `_Innnnn`        | Custom interval buckets        | `myproject_I12345`   |
@@ -274,7 +274,7 @@ pushback --list-servers
 
 ## Profiles Configuration
 
-File: `~/.config/pushback/profiles.toml`
+File: `~/.config/pushback/profiles.toml` (or the path set in `profiles_file`).
 
 Defines reusable filter profiles that can be auto-detected or always applied.
 

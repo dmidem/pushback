@@ -273,6 +273,7 @@ pushback --rsync-extra "--times --perms" .
 echo "*.mp4" > /tmp/extra-ignore
 pushback --rsync-extra "--filter='merge /tmp/extra-ignore'" .
 ```
+> **Warning:** Providing `--rsync-extra "-e …"` replaces the SSH command used by pushback and disables the built-in multiplexing options. Only use it when you intend to override the SSH configuration entirely.
 
 ### Backup to custom SSH port (per-command)
 ```bash
@@ -288,6 +289,7 @@ pushback --rsync-extra "-e 'ssh -p 2222'" --server custom .
 # Dry-run with checksum verification
 pushback --dry-run --rsync-extra "--checksum" .
 ```
+> Checksums force rsync to re-read every file locally and remotely; use only for troubleshooting or infrequent integrity checks.
 
 ---
 

@@ -1,12 +1,16 @@
 """Configuration loading and management."""
 
 import hashlib
+import os
 import sys
 import tomllib
+from dataclasses import dataclass
 from datetime import datetime
 from importlib import resources
 from pathlib import Path
 from typing import TypedDict
+
+from . import APP_NAME
 
 
 class OptionsDict(TypedDict):
@@ -21,17 +25,51 @@ class OptionsDict(TypedDict):
     autodetect_profiles: bool
 
 
+class ServerEntry(TypedDict):
+    """Server definition as loaded from TOML."""
+
+    user: str
+    host: str
+    port: int
+    base: str
+    default: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SyncParams:
+    """Computed sync parameters for a project root."""
+
+    root: Path
+    canonical_path: str
+    folder_name: str
+    suffix: str
+    snapshot_mode: str
+    snapshot_custom_hours: int
+    time_suffix: str
+
+
+def default_config_dir() -> Path:
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming")
+        return Path(base) / APP_NAME
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    return (Path(xdg) if xdg else Path.home() / ".config") / APP_NAME
+
+
+DEFAULT_CONFIG_DIR = default_config_dir()
+DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.toml"
+DEFAULT_PROFILES_PATH = DEFAULT_CONFIG_DIR / "profiles.toml"
+
+
 DEFAULT_OPTIONS: OptionsDict = {
     "delete_remote": False,
-    "profiles_file": "~/.config/pushback/profiles.toml",
+    "profiles_file": str(DEFAULT_PROFILES_PATH),
     "snapshot_mode": "none",
     "snapshot_custom_hours": 24,
     "include_backupignore": True,
     "include_gitignore": False,
     "autodetect_profiles": True,
 }
-
-DEFAULT_CONFIG_PATH = Path.home() / ".config" / "pushback" / "config.toml"
 
 
 def _get_embedded_file(filename: str) -> str:
@@ -41,20 +79,19 @@ def _get_embedded_file(filename: str) -> str:
 
         return resources.read_text(pushback._embedded, filename, encoding="utf-8")
     except Exception:
-        # If embedded files not found, return minimal config
         if filename == "config.toml":
             return _minimal_config()
-        elif filename == "profiles.toml":
+        if filename == "profiles.toml":
             return _minimal_profiles()
         return ""
 
 
 def _minimal_config() -> str:
     """Minimal fallback config"""
-    return """\
+    return f"""\
 [options]
 delete_remote = false
-profiles_file = "~/.config/pushback/profiles.toml"
+profiles_file = "~/.config/{APP_NAME}/profiles.toml"
 snapshot_mode = "none"
 snapshot_custom_hours = 24
 include_backupignore = true
@@ -66,7 +103,7 @@ name = "main"
 user = "your_user"
 host = "your.host.example"
 port = 22
-base = "~/pushback"
+base = "~/{APP_NAME}"
 default = true
 """
 
@@ -87,7 +124,7 @@ class Config:
     def __init__(self, config_path: str | None = None):
         """Initialize configuration"""
         self.path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
-        self.servers: dict[str, dict] = {}
+        self.servers: dict[str, ServerEntry] = {}
         self.options: OptionsDict = DEFAULT_OPTIONS.copy()
         self.profiles_path = Path()
 
@@ -103,14 +140,11 @@ class Config:
             force: Overwrite existing files
             auto: Auto-create without prompts (first-run behavior)
         """
-        # Ensure config directory exists
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Get default profiles path
         profiles_path = Path(DEFAULT_OPTIONS["profiles_file"]).expanduser()
         profiles_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Handle config.toml
         if self.path.exists() and not force:
             if not auto:
                 print(f"Config already exists: {self.path}")
@@ -121,7 +155,6 @@ class Config:
             if not auto:
                 print(f"Created config: {self.path}")
 
-        # Handle profiles.toml
         if profiles_path.exists() and not force:
             if not auto:
                 print(f"Profiles already exist: {profiles_path}")
@@ -132,7 +165,7 @@ class Config:
                 print(f"Created profiles: {profiles_path}")
 
         if not auto:
-            print("\nEdit these files to configure pushback:")
+            print(f"\nEdit these files to configure {APP_NAME}:")
             print(f"  Config:   {self.path}")
             print(f"  Profiles: {profiles_path}")
 
@@ -147,22 +180,19 @@ class Config:
 
     def load(self):
         """Load configuration from TOML file"""
-        # Auto-initialize if needed
         self.ensure_initialized()
 
         try:
             content = self.path.read_text(encoding="utf-8")
             data = tomllib.loads(content)
         except FileNotFoundError:
-            raise ValueError(f"Config file not found: {self.path}")
-        except tomllib.TOMLDecodeError as e:
-            raise ValueError(f"Invalid TOML in config: {e}")
+            raise ValueError(f"Config file not found: {self.path}") from None
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError(f"Invalid TOML in config: {exc}") from None
 
-        # Load options with defaults
         if "options" in data:
             self.options = self._parse_options(data["options"])
 
-        # Load servers
         if "server" not in data:
             raise ValueError("No servers defined in config")
 
@@ -172,22 +202,28 @@ class Config:
             if not name:
                 raise ValueError("Server missing 'name' field")
 
-            for field in ["user", "host", "base"]:
+            for field in ("user", "host", "base"):
                 if field not in server:
                     raise ValueError(f"Server '{name}' missing required field: {field}")
 
+            try:
+                port = int(server.get("port", 22))
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Server '{name}' has invalid port: {server.get('port')!r}"
+                ) from None
+
             self.servers[name] = {
-                "user": server["user"],
-                "host": server["host"],
-                "port": server.get("port", 22),
-                "base": server["base"],
-                "default": server.get("default", False),
+                "user": str(server["user"]),
+                "host": str(server["host"]),
+                "port": port,
+                "base": str(server["base"]),
+                "default": bool(server.get("default", False)),
             }
 
         if not any(s["default"] for s in self.servers.values()):
             raise ValueError("At least one server must have default = true")
 
-        # Set profiles path
         profiles_file = self.options["profiles_file"]
         self.profiles_path = Path(profiles_file).expanduser()
 
@@ -203,16 +239,14 @@ class Config:
             user = cfg["user"]
             port = cfg["port"]
             base = cfg["base"]
-            is_default = cfg["default"]
-            default_str = " (default)" if is_default else ""
-
+            default_str = " (default)" if cfg["default"] else ""
             print(f"  {name}: {user}@{host}:{port} -> {base}{default_str}")
 
-    def select_servers(self, server_arg: str | None) -> dict[str, dict]:
+    def select_servers(self, server_arg: str | None) -> dict[str, ServerEntry]:
         """Select which servers to use"""
         if server_arg:
             requested = [s.strip() for s in server_arg.split(",") if s.strip()]
-            selected = {}
+            selected: dict[str, ServerEntry] = {}
             for server_name in requested:
                 if server_name in self.servers:
                     selected[server_name] = self.servers[server_name]
@@ -221,10 +255,10 @@ class Config:
                     print(f"Available: {', '.join(self.servers.keys())}", file=sys.stderr)
                     return {}
             return selected
-        else:
-            return {name: cfg for name, cfg in self.servers.items() if cfg["default"]}
 
-    def prepare_sync_params(self, root: Path, args) -> dict:
+        return {name: cfg for name, cfg in self.servers.items() if cfg["default"]}
+
+    def prepare_sync_params(self, root: Path, args) -> SyncParams:
         """Prepare parameters for syncing"""
         canonical_path = str(root)
         folder_name = root.name or "folder"
@@ -235,15 +269,15 @@ class Config:
 
         time_suffix = self._get_time_suffix(snapshot_mode, snapshot_custom_hours)
 
-        return {
-            "root": root,
-            "canonical_path": canonical_path,
-            "folder_name": folder_name,
-            "suffix": suffix,
-            "snapshot_mode": snapshot_mode,
-            "snapshot_custom_hours": snapshot_custom_hours,
-            "time_suffix": time_suffix,
-        }
+        return SyncParams(
+            root=root,
+            canonical_path=canonical_path,
+            folder_name=folder_name,
+            suffix=suffix,
+            snapshot_mode=snapshot_mode,
+            snapshot_custom_hours=snapshot_custom_hours,
+            time_suffix=time_suffix,
+        )
 
     def _parse_options(self, opts: dict) -> OptionsDict:
         """Parse options from TOML data with type conversion."""

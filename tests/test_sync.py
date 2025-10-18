@@ -6,7 +6,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from pushback.sync import _build_filter, _handle_collision
+from pushback.sync import (
+    _build_filter,
+    _handle_collision,
+    _to_remote_config,
+    rsync_friendly_path,
+)
 
 
 @pytest.fixture
@@ -181,6 +186,34 @@ def test_handle_collision_force_update(test_env):
     assert result == "update"
 
 
+def test_to_remote_config_with_mapping():
+    config = {
+        "user": "alice",
+        "host": "example.com",
+        "port": "2200",
+        "base": "/data",
+    }
+    remote = _to_remote_config("main", config)
+    assert remote.user == "alice"
+    assert remote.host == "example.com"
+    assert remote.port == 2200
+    assert remote.base == "/data"
+
+
+def test_to_remote_config_with_namespace():
+    config = SimpleNamespace(user="bob", host="srv", port=2022, base="~/backups")
+    remote = _to_remote_config("secondary", config)
+    assert remote.user == "bob"
+    assert remote.port == 2022
+    assert remote.base == "~/backups"
+
+
+def test_to_remote_config_invalid_port():
+    config = {"user": "bad", "host": "srv", "port": "nan", "base": "/tmp"}
+    with pytest.raises(ValueError):
+        _to_remote_config("broken", config)
+
+
 def _local_rsync_sync(
     source: Path,
     target: Path,
@@ -196,14 +229,28 @@ def _local_rsync_sync(
     try:
         target.mkdir(parents=True, exist_ok=True)
 
-        cmd = ["rsync", "-a", "--safe-links", "--prune-empty-dirs", f"--filter=merge {filter_path}"]
+        src_path = rsync_friendly_path(source)
+        dst_path = rsync_friendly_path(target)
+        filt = rsync_friendly_path(Path(filter_path))
+
+        def with_slash(path: str) -> str:
+            return path.rstrip("/") + "/"
+
+        cmd = [
+            "rsync",
+            "-a",
+            "--safe-links",
+            "--prune-empty-dirs",
+            "--filter",
+            f"merge {filt}",
+        ]
 
         if args.delete:
             cmd.append("--delete")
         if args.dry_run:
             cmd.extend(["--dry-run", "--itemize-changes"])
 
-        cmd.extend([str(source) + "/", str(target) + "/"])
+        cmd.extend([with_slash(src_path), with_slash(dst_path)])
 
         result = subprocess.run(cmd, capture_output=True, text=True)
         return result.returncode

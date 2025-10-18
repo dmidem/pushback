@@ -2,7 +2,7 @@
 
 A lightweight SSH/rsync-based backup tool with multi-server support, collision-safe paths, time-based snapshots, and smart gitignore-style filtering.
 
-**Simple by default** — just run `pushback .` in any folder to back it up.  
+**Simple by default** — just run `pushback .` in any folder to back it up.
 **Powerful when needed** — read this README or run `pushback -h` for full options.
 
 ## Quick Start
@@ -46,13 +46,24 @@ pushback --server primary,offsite ~/critical
 
 ## Installation
 
-### Method 1: pip (Recommended)
+### Requirements
 
+- **Local:** Python 3.11+ (for Methods 1–2; see below), `ssh`, `rsync`
+- **Remote:** Reachable SSH server (`sshd`) with `rsync` and standard POSIX tools (`ls`, `xargs`, `basename`)
+
+### Method 1: pip
+
+On Linux/macOS:
 ```bash
 pip install --user pushback
 ```
 
-**Note:** If `pip` command not found:
+On Windows:
+```powershell
+py -m pip install --user pushback
+```
+
+If `pip` isn’t available:
 ```bash
 # Ubuntu/Debian
 sudo apt install python3-pip
@@ -61,12 +72,11 @@ sudo apt install python3-pip
 python3 -m ensurepip
 ```
 
-### Method 2: Single-File Executable
+### Method 2: Single-file executable
 
-Download from [Releases](https://github.com/dmidem/pushback/releases):
-
+Run (shown on Linux, macOS and Windows are similar):
 ```bash
-# Download latest
+# Download latest pushback.pyz release
 wget https://github.com/dmidem/pushback/releases/latest/download/pushback.pyz
 
 # Install
@@ -74,20 +84,13 @@ chmod +x pushback.pyz
 mkdir -p ~/.local/bin
 mv pushback.pyz ~/.local/bin/pushback
 ```
+*Ensure `~/.local/bin` is in your `PATH`*
 
-### Ensure `~/.local/bin` is in `PATH`
+### Method 3: Prebuilt executables (Linux, macOS, Windows)
 
-```bash
-if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-    export PATH="$HOME/.local/bin:$PATH"
-fi
-```
-
-### Requirements
-
-- **Local**: Python 3.11+, `ssh`, `rsync`
-- **Remote**: Standard POSIX tools (`ls`, `xargs`, `basename`)
+Download the archive for your platform from the [Releases](https://github.com/dmidem/pushback/releases) page, extract it,
+and place the `pushback` binary somewhere on your `PATH` (for example, `/usr/local/bin` or `~/.local/bin` on Unix,
+`%LocalAppData%\Programs\pushback` on Windows). Each bundle includes the CLI and a `docs/` directory for offline reference.
 
 ## Features
 
@@ -178,6 +181,7 @@ pushback --server work,offsite .    # multiple servers
 ### Smart Filtering
 
 pushback uses **profiles** that auto-detect project types and apply appropriate ignore patterns.
+See the [configuration reference](docs/options.md#profiles-configuration) for full profile details.
 
 **Example profiles.toml:**
 
@@ -299,9 +303,9 @@ pushback/
 
 ### CI/CD Workflow
 
-pushback uses GitHub Actions for automated testing and releases (see `.github/workflows/cy.yml` and `.github/workflows/release.yml`).
+pushback uses GitHub Actions for automated testing and releases (see `.github/workflows/ci.yml` and `.github/workflows/release.yml`).
 
-**Continuous Integration (`cy.yml`):**
+**Continuous Integration (`ci.yml`):**
 - Runs on every push and pull request
 - Performs linting, type checking, and formatting validation with `ruff`
 - Runs test suite with `pytest`

@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (e.g., v0.1.0)'
+        required: true
+        type: string
+      notes:
+        description: 'Release notes (optional)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    uses: ./.github/workflows/common-build.yml
+    with:
+      python-versions: '["3.11", "latest"]'
+      oses: '["ubuntu-latest", "macos-latest", "windows-latest"]'
+      upload-artifacts: true
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag_name || github.ref_name }}
+      PROJECT_NAME: pushback
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist/
+
+      - name: Define release file list
+        shell: bash
+        run: |
+          cat >> "$GITHUB_ENV" <<'EOF'
+          FILES<<LIST
+          dist/${{ env.PROJECT_NAME }}.pyz
+          dist/${{ env.PROJECT_NAME }}-linux-x86_64-v*.tar.gz
+          dist/${{ env.PROJECT_NAME }}-macos-universal2-v*.tar.gz
+          dist/${{ env.PROJECT_NAME }}-windows-x86_64-v*.zip
+          LIST
+          EOF
+
+      - name: Ensure all release file exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r pattern; do
+            [[ -z "$pattern" ]] && continue
+            ls -1 $pattern >/dev/null 2>&1 || { echo "Missing: $pattern" >&2; exit 1; }
+          done <<< "$FILES"
+          echo "✓ All required files found"
+
+      - name: Validate tag matches pyproject.toml version
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYPROJECT_VERSION=$(sed -nE 's/^version = "(.+)"\s*$/v\1/p' pyproject.toml)
+
+          if [ -z "$PYPROJECT_VERSION" ]; then
+            echo "ERROR: Could not extract version from pyproject.toml" >&2
+            exit 1
+          fi
+
+          echo "Release tag: $RELEASE_TAG"
+          echo "pyproject.toml version: $PYPROJECT_VERSION"
+
+          if [ "$PYPROJECT_VERSION" != "$RELEASE_TAG" ]; then
+            echo "ERROR: Release tag does not match pyproject.toml version" >&2
+            exit 1
+          fi
+
+          echo "✓ Tag matches pyproject.toml version"
+
+      - name: Create release and upload all assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.PROJECT_NAME }} ${{ env.RELEASE_TAG }}
+          body: |
+            ## ${{ env.PROJECT_NAME }} ${{ env.RELEASE_TAG }}
+
+            Cross-platform binaries and a universal `.pyz`.
+
+            ### Downloads
+            - Linux / macOS / Windows archives (below)
+            - Universal: `${{ env.PROJECT_NAME }}.pyz` (requires Python)
+
+            ### Notes
+            ${{ inputs.notes || format('Automated release for {0}. See commit history for detailed changes.', env.RELEASE_TAG) }}
+          draft: false
+          prerelease: ${{ contains(env.RELEASE_TAG, 'alpha') || contains(env.RELEASE_TAG, 'beta') || contains(env.RELEASE_TAG, 'rc') }}
+          files: ${{ env.FILES }}
+          fail_on_unmatched_files: true

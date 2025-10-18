@@ -2,7 +2,10 @@
 
 import shlex
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
+
+from . import APP_NAME
 
 
 class RemoteManager:
@@ -17,7 +20,7 @@ class RemoteManager:
         if not self.multiplex:
             return ["-p", str(port)]
 
-        control_path = str(Path.home() / ".ssh/pushback-%r@%h-%p")
+        control_path = str(Path.home() / f".ssh/{APP_NAME}-%r@%h-%p")
         return [
             "-p",
             str(port),
@@ -29,10 +32,16 @@ class RemoteManager:
             "ControlPersist=60",
         ]
 
-    def run_ssh(self, user: str, host: str, port: int, script: str) -> subprocess.CompletedProcess:
+    def run_ssh(self, user: str, host: str, port: int, script: str) -> str:
         """Run SSH command"""
         cmd = ["ssh", *self.ssh_opts(port), f"{user}@{host}", script]
-        return subprocess.run(cmd, check=False, capture_output=True, text=True)
+        try:
+            return subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True)
+        except FileNotFoundError as exc:
+            raise RuntimeError("SSH client not found, install and ensure it is in PATH.") from exc
+        except subprocess.CalledProcessError as exc:
+            msg = (exc.output or "").strip() or f"ssh exited with code {exc.returncode}"
+            raise RuntimeError(msg) from exc
 
     def test_dir(self, user: str, host: str, port: int, path: str) -> bool:
         """Test if remote directory exists"""
@@ -42,12 +51,12 @@ class RemoteManager:
             script = f"cd ~ && test -d {self._quote(target)} && echo OK || echo MISSING"
         else:
             script = f"test -d {self._quote(path)} && echo OK || echo MISSING"
+        return "OK" in (self.run_ssh(user, host, port, script) or "")
 
-        try:
-            result = self.run_ssh(user, host, port, script)
-            return "OK" in (result.stdout or "")
-        except Exception:
-            return False
+    def list_by_script(self, user: str, host: str, port: int, script: str) -> list[str]:
+        """List directories using with given script"""
+        result = self.run_ssh(user, host, port, script)
+        return [line.strip() for line in (result or "").splitlines() if line.strip()]
 
     def list_siblings(self, user: str, host: str, port: int, base: str, prefix: str) -> list[str]:
         """List sibling directories with given prefix"""
@@ -65,14 +74,7 @@ class RemoteManager:
                 f"{self._quote(base.rstrip('/') + '/' + prefix + '_')}* "
                 f"2>/dev/null | xargs -n1 basename 2>/dev/null || true"
             )
-
-        try:
-            result = self.run_ssh(user, host, port, script)
-            if result.returncode != 0 and not (result.stdout or "").strip():
-                return []
-            return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
-        except Exception:
-            return []
+        return self.list_by_script(user, host, port, script)
 
     def list_all(self, user: str, host: str, port: int, base: str) -> list[str]:
         """List all directories in base"""
@@ -82,28 +84,14 @@ class RemoteManager:
             script = f"cd ~ && ls -1 {self._quote(target)} 2>/dev/null || true"
         else:
             script = f"ls -1 {self._quote(base.rstrip('/'))} 2>/dev/null || true"
+        return self.list_by_script(user, host, port, script)
 
-        try:
-            result = self.run_ssh(user, host, port, script)
-            if result.returncode != 0 and not (result.stdout or "").strip():
-                return []
-            return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
-        except Exception:
-            return []
-
-    def list_backups(self, server_name: str, server_config: dict, name_filter: str) -> int:
+    def list_backups(self, server_name: str, server_config, name_filter: str) -> list[str]:
         """List remote backups"""
-        user = server_config["USER"]
-        host = server_config["HOST"]
-        base = server_config["BASE"]
-        port = int(server_config["PORT"])
+        user, host, port, base = self._unpack_server_config(server_name, server_config)
 
         if not self.test_dir(user, host, port, base):
-            print(
-                f"Error: remote base does not exist on {server_name}: {base}",
-                file=__import__("sys").stderr,
-            )
-            return 2
+            raise RuntimeError(f"remote base does not exist on {server_name}: {base}")
 
         if name_filter:
             items = self.list_siblings(user, host, port, base, name_filter)
@@ -111,15 +99,7 @@ class RemoteManager:
             items = self.list_all(user, host, port, base)
             items = [x for x in items if "_" in x]
 
-        if not items:
-            print(f"(no backups found on {server_name})")
-            return 0
-
-        filter_text = f" (filtered by {name_filter})" if name_filter else ""
-        print(f"Backups on {server_name} ({user}@{host}:{base}){filter_text}:")
-        for item in sorted(items):
-            print("  -", item)
-        return 0
+        return items
 
     def find_existing_snapshot(
         self, siblings: list[str], base_name: str, time_suffix: str
@@ -151,3 +131,32 @@ class RemoteManager:
     def _quote(s: str) -> str:
         """Shell-quote string"""
         return shlex.quote(s)
+
+    @staticmethod
+    def _unpack_server_config(server_name: str, server_config) -> tuple[str, str, int, str]:
+        """Normalise server configuration into primitives."""
+        if hasattr(server_config, "user"):
+            user = getattr(server_config, "user")
+            host = getattr(server_config, "host")
+            port = getattr(server_config, "port", 22)
+            base = getattr(server_config, "base")
+        elif isinstance(server_config, Mapping):
+            try:
+                user = server_config["user"]
+                host = server_config["host"]
+                base = server_config["base"]
+            except KeyError as missing:
+                raise KeyError(f"Server '{server_name}' missing field: {missing.args[0]}") from None
+            port = server_config.get("port", 22)
+        else:
+            raise TypeError(
+                "Unsupported server configuration type for "
+                f"'{server_name}': {type(server_config)!r}"
+            )
+
+        try:
+            port_int = int(port)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Server '{server_name}' has invalid port value: {port!r}") from exc
+
+        return str(user), str(host), port_int, str(base)
