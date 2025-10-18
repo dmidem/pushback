@@ -39,21 +39,26 @@ jobs:
         shell: bash
         run: |
           echo "Using Python: $(python -V)"
-          uv sync --frozen --extra dev
+          uv sync --group dev --frozen
 
       - name: Run checks
         shell: bash
-        run: uv run python dev.py check
+        run: uv run python scripts/dev.py check
 
+      - name: Run end-to-end tests
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == 'latest'
+        shell: bash
+        run: uv run python scripts/dev.py test-slow
+ 
       - name: Build wheel/sdist/zipapp (Ubuntu and the latest Python only)
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == 'latest'
         shell: bash
-        run: uv run python dev.py build
+        run: uv run python scripts/dev.py build
 
       - name: Build standalone binary (all OSes and the latest Python only)
         if: matrix.python-version == 'latest'
         shell: bash
-        run: uv run python dev.py build-standalone
+        run: uv run python scripts/dev.py build-standalone
 
       - name: Test built artifacts
         if: matrix.python-version == 'latest'

@@ -1,154 +1,211 @@
 """
-pushback — SSH/rsync-based backup tool.
-
-Copyright (c) 2025 Dmitry Demin, https://github.com/dmidem
-Licensed under Apache-2.0 OR MIT
+Command-line interface and main entry point.
+Parses arguments, loads configuration, and runs sync operations.
 """
 
 import argparse
+import platform
+import shutil
+import subprocess
 import sys
 from pathlib import Path
+from textwrap import dedent
 
-from pushback.config import Config, ServerEntry, SyncParams
-from pushback.remote import RemoteManager
-from pushback.sync import sync_to_server
+from . import APP_DESCRIPTION, APP_NAME, HOMEPAGE, VERSION
+from .config import Config, ServerEntry, SyncParams, default_config_dir
+from .remote import RemoteManager
+from .sync import sync_to_server
 
-from . import APP_NAME, __version__
 
-HELP_EPILOG = f"""
+def check_rsync() -> tuple[bool, str]:
+    """Check if rsync is available and compatible.
+
+    Returns:
+        (is_compatible, message)
+    """
+    rsync_path = shutil.which("rsync")
+    if not rsync_path:
+        msg = "rsync not found in PATH.\nInstall instructions:\n"
+        system = platform.system()
+        if system == "Darwin":
+            msg += "  macOS: brew install rsync"
+        elif system == "Windows":
+            msg += "  Windows: choco install rsync, pacman/msys2, or use WSL"
+        elif system == "Linux":
+            msg += "  Linux: Install rsync via your package manager"
+        else:
+            msg += f"  {system}: Install GNU rsync via your package manager"
+
+        return False, msg
+
+    try:
+        result = subprocess.run(
+            [rsync_path, "--version"], capture_output=True, text=True, timeout=5
+        )
+        version_line = result.stdout.split("\n")[0] if result.stdout else ""
+
+        # Check for openrsync (limited functionality)
+        if "openrsync" in result.stdout.lower():
+            return False, (
+                f"Incompatible rsync found: {version_line}\n"
+                f"macOS ships with openrsync which has limited functionality.\n"
+                f"Install GNU rsync: brew install rsync"
+            )
+
+        return True, f"rsync OK: {version_line}"
+
+    except Exception as e:
+        return False, f"Error checking rsync: {e}"
+
+
+def check_ssh() -> tuple[bool, str]:
+    """Check if SSH client is available.
+
+    Returns:
+        (is_available, message)
+    """
+    ssh_path = shutil.which("ssh")
+    if not ssh_path:
+        return False, "ssh not found in PATH (should be pre-installed on most systems)"
+
+    try:
+        result = subprocess.run([ssh_path, "-V"], capture_output=True, text=True, timeout=5)
+        # SSH writes version to stderr
+        version_info = (result.stderr or result.stdout).strip().split("\n")[0]
+        return True, f"ssh OK: {version_info}"
+    except Exception as e:
+        return False, f"Error checking ssh: {e}"
+
+
+def check_dependencies(verbose: bool = False) -> bool:
+    """Check all dependencies and report status.
+
+    Args:
+        verbose: Show success messages, not just failures
+
+    Returns:
+        True if all dependencies are satisfied
+    """
+    checks = [
+        ("rsync", check_rsync()),
+        ("ssh", check_ssh()),
+    ]
+
+    all_ok = True
+    messages: list[str] = []
+
+    for name, (is_ok, message) in checks:
+        if not is_ok:
+            all_ok = False
+            messages.append(f"✗ {name}: {message}")
+        elif verbose:
+            messages.append(f"✓ {message}")
+
+    if messages:
+        print("\n".join(messages))
+        if not all_ok:
+            print()
+
+    return all_ok
+
+
+DEFAULT_CONFIG_DIR = default_config_dir()
+
+HELP_EPILOG = dedent(f"""
+QUICK START
+  1) Run: {APP_NAME} --init-config
+  2) Edit {DEFAULT_CONFIG_DIR}/config.toml
+  3) {APP_NAME} .              # sync the current directory
+     {APP_NAME} /path/to/dir   # sync a specific directory
+
+CONFIG PATHS
+  Config:   {DEFAULT_CONFIG_DIR}/config.toml
+  Profiles: {DEFAULT_CONFIG_DIR}/profiles.toml
+
 REQUIREMENTS
   Local:  rsync, ssh
   Remote: standard POSIX tools (ls, xargs, basename)
 
-CONFIG
-  Default: ~/.config/{APP_NAME}/config.toml
-  Profiles: ~/.config/{APP_NAME}/profiles.toml
-  Create:   {APP_NAME} --init-config
-
-MULTIPLE SERVERS
-  Define servers in config.toml:
-
-    [[server]]
-    name = "main"
-    user = "user1"
-    host = "host1.example.com"
-    port = 22
-    base = "~/{APP_NAME}"
-    default = true
-
-    [[server]]
-    name = "backup"
-    user = "user2"
-    host = "host2.example.com"
-    port = 22
-    base = "~/backups"
-    default = false
-
-  Usage:
-    {APP_NAME} . # Uses all default servers
-    {APP_NAME} --server backup . # Uses only 'backup'
-    {APP_NAME} --server main,backup . # Uses both
-
-IGNORE RULES
-  Uses filters with gitignore semantics:
-    • Profile-based rules (auto-detected from profiles.toml)
-    • Per-project: .backupignore (gitignore format)
-
-SIZE FILTERING
-  Use rsync's native size filters:
-    --max-size 100M # Skip files larger than 100M
-    --min-size 1K # Skip files smaller than 1K
-
-EXAMPLES
-  • Simple backup:         {APP_NAME} .
-  • Preview changes:       {APP_NAME} --dry-run .
-  • Skip large files:      {APP_NAME} --max-size 500M .
-  • Multiple servers:      {APP_NAME} --server main,backup .
-  • Daily snapshots:       {APP_NAME} --snapshot-mode daily ~/project
-"""
+MORE INFO
+  See README & docs: {HOMEPAGE}
+""").strip()
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build argument parser"""
     parser = argparse.ArgumentParser(
         prog=APP_NAME,
-        description="Backup/sync a project folder to remote server(s) using rsync over SSH.",
+        description=APP_DESCRIPTION,
         formatter_class=argparse.RawTextHelpFormatter,
         epilog=HELP_EPILOG,
     )
 
+    # Simple flags (keep as store_true — no need for --no-verbose etc.)
+    parser.add_argument("--init-config", action="store_true", help="Create template config file")
+    parser.add_argument("--list-servers", action="store_true", help="List configured servers")
+    parser.add_argument("--verbose", action="store_true", help="Verbose output")
+    parser.add_argument("--version", action="store_true", help="Print version number and exit")
+
+    # Plain options
     parser.add_argument(
         "--config",
         type=str,
         default=None,
-        help=f"Path to config file (default: ~/.config/{APP_NAME}/config.toml)",
+        help=f"Path to config file (default: {DEFAULT_CONFIG_DIR}/config.toml)",
     )
-    parser.add_argument("--init-config", action="store_true", help="Create template config file")
-    parser.add_argument(
-        "--server",
-        type=str,
-        help="Use specific server(s), comma-separated",
-    )
-    parser.add_argument("--list-servers", action="store_true", help="List configured servers")
-    parser.add_argument("--verbose", action="store_true", help="Verbose output")
-    parser.add_argument("--version", action="store_true", help="Print version number and exit")
-    parser.add_argument(
-        "--no-multiplex", action="store_true", help="Disable SSH connection sharing"
-    )
-
-    delete_group = parser.add_mutually_exclusive_group()
-    delete_group.add_argument(
-        "-d",
-        "--delete",
-        action="store_true",
-        help="Delete remote files not present locally",
-    )
-    delete_group.add_argument("--no-delete", action="store_true", help="Disable deletion")
-
-    backupignore_group = parser.add_mutually_exclusive_group()
-    backupignore_group.add_argument(
-        "--include-backupignore",
-        action="store_true",
-        help="Include .backupignore rules (overrides config)",
-    )
-    backupignore_group.add_argument(
-        "--no-backupignore",
-        action="store_true",
-        help="Exclude .backupignore rules (overrides config)",
-    )
-
-    gitignore_group = parser.add_mutually_exclusive_group()
-    gitignore_group.add_argument(
-        "--include-gitignore",
-        action="store_true",
-        help="Include .gitignore rules (overrides config)",
-    )
-    gitignore_group.add_argument(
-        "--no-gitignore",
-        action="store_true",
-        help="Exclude .gitignore rules (overrides config)",
-    )
-
-    autodetect_group = parser.add_mutually_exclusive_group()
-    autodetect_group.add_argument(
-        "--autodetect-profiles",
-        action="store_true",
-        help="Auto-detect project type (overrides config)",
-    )
-    autodetect_group.add_argument(
-        "--no-autodetect",
-        action="store_true",
-        help="Disable profile auto-detection (overrides config)",
-    )
-
-    # Rsync options
+    parser.add_argument("--server", type=str, help="Use specific server(s), comma-separated")
+    parser.add_argument("--rsync-extra", type=str, default="", help="Extra rsync flags")
     parser.add_argument("--dry-run", action="store_true", help="Preview changes only")
     parser.add_argument("--stats", action="store_true", help="Show rsync stats")
     parser.add_argument("--max-size", type=str, help="Skip files larger than SIZE (e.g., 100M, 2G)")
     parser.add_argument(
         "--min-size", type=str, help="Skip files smaller than SIZE (e.g., 1K, 100B)"
     )
-    parser.add_argument("--rsync-extra", type=str, default="", help="Extra rsync flags")
+
+    # BooleanOptionalAction (tri-state via default=None; CLI provides --foo/--no-foo)
+    parser.add_argument(
+        "-d",
+        "--delete",
+        dest="delete",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Delete remote files not present locally (use --no-delete to disable).",
+    )
+    parser.add_argument(
+        "--include-backupignore",
+        dest="include_backupignore",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Include .backupignore rules (use --no-include-backupignore to disable).",
+    )
+    parser.add_argument(
+        "--include-gitignore",
+        dest="include_gitignore",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Include .gitignore rules (use --no-include-gitignore to disable).",
+    )
+    parser.add_argument(
+        "--autodetect-profiles",
+        dest="autodetect_profiles",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Auto-detect project type (use --no-autodetect-profiles to disable).",
+    )
+    parser.add_argument(
+        "--ssh-multiplex",
+        dest="ssh_multiplex",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable SSH connection sharing (use --no-ssh-multiplex to disable).",
+    )
+    parser.add_argument(
+        "--check-dependencies",
+        dest="check_dependencies",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Check rsync/ssh compatibility (use --no-check-dependencies to skip).",
+    )
 
     # Remote listing
     parser.add_argument(
@@ -157,15 +214,6 @@ def build_parser() -> argparse.ArgumentParser:
         const="",
         metavar="NAME",
         help="List remote backups",
-    )
-
-    # Force options
-    parser.add_argument("--force-all", action="store_true", help="Enable all force behaviors")
-    parser.add_argument(
-        "--force-collision-new", action="store_true", help="Auto-create new on collision"
-    )
-    parser.add_argument(
-        "--force-collision-update", action="store_true", help="Auto-update on collision"
     )
 
     # Snapshot options
@@ -178,11 +226,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--snapshot-custom-hours", type=int, help="Custom snapshot interval (hours)"
     )
 
+    # Positional
     parser.add_argument(
         "PROJECT_PATH", nargs="?", help="Folder to backup (use '.' for current dir)"
     )
 
+    # Force options (used by init-config and collision handling)
+    parser.add_argument(
+        "--force-all", action="store_true", help="Enable all force behaviors (skip prompts)"
+    )
+    parser.add_argument(
+        "--force-collision-new",
+        action="store_true",
+        help="On name collision: create new backup automatically",
+    )
+    parser.add_argument(
+        "--force-collision-update",
+        action="store_true",
+        help="On name collision: update the latest existing backup",
+    )
+
     return parser
+
+
+def resolve_bool(cli_value: bool | None, cfg_value: bool) -> bool:
+    return cfg_value if cli_value is None else cli_value
 
 
 def main():
@@ -198,7 +266,7 @@ def main():
         return exc.code
 
     if args.version:
-        print(f"{APP_NAME} v{__version__}")
+        print(f"{APP_NAME} v{VERSION}")
         return 0
 
     # Load/initialise configuration
@@ -214,6 +282,25 @@ def main():
         print(f"Error loading config: {exc}", file=sys.stderr)
         return 2
 
+    args.include_backupignore = resolve_bool(
+        args.include_backupignore, config.options["include_backupignore"]
+    )
+    args.include_gitignore = resolve_bool(
+        args.include_gitignore, config.options["include_gitignore"]
+    )
+    args.autodetect_profiles = resolve_bool(
+        args.autodetect_profiles, config.options["autodetect_profiles"]
+    )
+    args.delete = resolve_bool(args.delete, config.options["delete_remote"])
+    args.ssh_multiplex = resolve_bool(args.ssh_multiplex, config.options["ssh_multiplex"])
+    args.check_dependencies = resolve_bool(
+        args.check_dependencies, config.options["check_dependencies"]
+    )
+
+    if args.check_dependencies:
+        if not check_dependencies(verbose=args.verbose):
+            return 2
+
     if args.list_servers:
         config.list_servers()
         return 0
@@ -222,7 +309,7 @@ def main():
     if not selected_servers:
         return 2
 
-    remote_mgr = RemoteManager(not args.no_multiplex)
+    remote_mgr = RemoteManager(args.ssh_multiplex)
 
     if args.list_remote is not None:
         name_filter = args.list_remote or ""
@@ -241,9 +328,7 @@ def main():
                         print("  -", item)
             except Exception as exc:  # noqa: BLE001
                 print(f"Error listing backups on {server_name}: {exc}", file=sys.stderr)
-                rc = 2
-            if rc != 0:
-                overall_rc = rc
+                overall_rc = 2
         return overall_rc
 
     require_project = not args.list_remote

@@ -24,6 +24,7 @@ pushback --init-config
 ```toml
 [options]
 delete_remote = false
+multiplex = true
 profiles_file = "~/.config/pushback/profiles.toml"
 snapshot_mode = "none"
 snapshot_custom_hours = 24
@@ -45,6 +46,7 @@ default = true
 ```toml
 [options]
 delete_remote = false
+multiplex = true
 profiles_file = "~/.config/pushback/profiles.toml"
 snapshot_mode = "daily"
 snapshot_custom_hours = 24
@@ -87,6 +89,23 @@ When `true`, deletes remote files not present locally (rsync's `--delete`).
 **Example:**
 ```toml
 delete_remote = false  # Safe default
+```
+
+#### `ssh_multiplex`
+- **Type:** boolean  
+- **Default:** `true`  
+- **CLI:** `--ssh-multiplex` / `--no-ssh-multiplex`
+
+Enable SSH connection sharing (OpenSSH ControlMaster/ControlPersist).
+
+**Why (for this app):** avoids repeated SSH password/passphrase prompts across multiple SSH/rsync steps and
+across sequential `pushback` invocations in shell scripts; also speeds things up by reusing the same connection.
+
+**Notes:** works on most Unix-like OpenSSH clients; disable on platforms where ControlMaster is unreliable.
+
+**Example:**
+```toml
+multiplex = true
 ```
 
 #### `profiles_file`
@@ -461,8 +480,6 @@ pushback [OPTIONS] [PROJECT_PATH]
 | `--dry-run` | Preview changes without writing |
 | `--verbose` | Detailed output |
 | `--stats` | Show rsync statistics |
-| `-d, --delete` | Delete remote files not present locally |
-| `--no-delete` | Disable deletion (override config) |
 | `--max-size SIZE` | Skip files larger than SIZE (e.g., `500M`, `2G`) |
 | `--min-size SIZE` | Skip files smaller than SIZE (e.g., `1K`) |
 | `--server NAME` | Use specific server(s), comma-separated |
@@ -476,12 +493,19 @@ pushback [OPTIONS] [PROJECT_PATH]
 
 | Option | Description |
 |--------|-------------|
-| `--include-backupignore` | Include `.backupignore` (override config) |
-| `--no-backupignore` | Exclude `.backupignore` |
-| `--include-gitignore` | Include `.gitignore` (override config) |
-| `--no-gitignore` | Exclude `.gitignore` |
-| `--autodetect-profiles` | Enable profile auto-detection (override config) |
-| `--no-autodetect` | Disable profile auto-detection |
+| `--include-backupignore` / `--no-include-backupignore` | Include / exclude `.backupignore` rules. If omitted, the value from config is used. |
+| `--include-gitignore` / `--no-include-gitignore` | Include / exclude `.gitignore` rules. If omitted, the value from config is used. |
+| `--autodetect-profiles` / `--no-autodetect-profiles` | Enable / disable profile auto-detection. If omitted, the value from config is used. |
+
+### Connection & Safety
+
+These flags use “yes/no” pairs; if neither is provided, the **config** value is used.
+
+| Option | Description |
+|--------|-------------|
+| `--ssh-multiplex` / `--no-ssh-multiplex` | Enable / disable SSH connection sharing (ControlMaster). |
+| `--check-dependencies` / `--no-check-dependencies` | Enable / skip rsync/ssh compatibility checks. |
+| `-d, --delete` / `--no-delete` | Delete remote files not present locally. |
 
 ### Force Options
 

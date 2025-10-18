@@ -11,13 +11,13 @@ from . import APP_NAME
 class RemoteManager:
     """Manage remote server operations"""
 
-    def __init__(self, multiplex: bool = True):
+    def __init__(self, ssh_multiplex: bool = True):
         """Initialize remote manager"""
-        self.multiplex = multiplex
+        self.ssh_multiplex = ssh_multiplex
 
     def ssh_opts(self, port: int) -> list[str]:
         """Build SSH options"""
-        if not self.multiplex:
+        if not self.ssh_multiplex:
             return ["-p", str(port)]
 
         control_path = str(Path.home() / f".ssh/{APP_NAME}-%r@%h-%p")
@@ -61,29 +61,40 @@ class RemoteManager:
     def list_siblings(self, user: str, host: str, port: int, base: str, prefix: str) -> list[str]:
         """List sibling directories with given prefix"""
         is_tilde, rest = self._split_remote_base(base)
+
         if is_tilde:
             base_dir = (rest.rstrip("/") + "/") if rest else ""
-            script = (
-                f"cd ~ && ls -1d "
-                f"{self._quote(base_dir + prefix + '_')}* 2>/dev/null | "
-                f"xargs -n1 basename 2>/dev/null || true"
-            )
+            cd_prefix = "cd ~ && "
+            search_path = base_dir
         else:
-            script = (
-                f"ls -1d "
-                f"{self._quote(base.rstrip('/') + '/' + prefix + '_')}* "
-                f"2>/dev/null | xargs -n1 basename 2>/dev/null || true"
-            )
+            cd_prefix = ""
+            search_path = base.rstrip("/") + "/"
+
+        script = (
+            f"{cd_prefix}"
+            f"find {self._quote(search_path.rstrip('/'))} -maxdepth 1 -type d "
+            f"-name {self._quote(prefix + '_*')} -print0 2>/dev/null | "
+            f"xargs -0 -n1 basename 2>/dev/null || true"
+        )
         return self.list_by_script(user, host, port, script)
 
     def list_all(self, user: str, host: str, port: int, base: str) -> list[str]:
         """List all directories in base"""
         is_tilde, rest = self._split_remote_base(base)
+
         if is_tilde:
-            target = rest.rstrip("/") if rest else "."
-            script = f"cd ~ && ls -1 {self._quote(target)} 2>/dev/null || true"
+            cd_prefix = "cd ~ && "
+            search_path = rest.rstrip("/") if rest else "."
         else:
-            script = f"ls -1 {self._quote(base.rstrip('/'))} 2>/dev/null || true"
+            cd_prefix = ""
+            search_path = base.rstrip("/")
+
+        script = (
+            f"{cd_prefix}"
+            f"find {self._quote(search_path)} -maxdepth 1 -type d ! -name '.' "
+            f"-print0 2>/dev/null | "
+            f"xargs -0 -n1 basename 2>/dev/null || true"
+        )
         return self.list_by_script(user, host, port, script)
 
     def list_backups(self, server_name: str, server_config, name_filter: str) -> list[str]:

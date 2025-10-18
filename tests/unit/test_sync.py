@@ -2,6 +2,7 @@
 
 import subprocess
 from pathlib import Path
+from textwrap import dedent
 from types import SimpleNamespace
 
 import pytest
@@ -31,11 +32,15 @@ def test_env(tmp_path):
 
     # Create profiles.toml with proper exclude patterns
     profiles_path = tmp_path / "profiles.toml"
-    profiles_path.write_text("""
-[profile.safe_defaults]
-always = true
-ignore = ["*.log", ".git/"]
-""")
+    profiles_path.write_text(
+        dedent(
+            """
+            [profile.safe_defaults]
+            always = true
+            ignore = ["*.log", ".git/"]
+            """
+        )
+    )
 
     # Create .backupignore for additional filtering
     backupignore = source_dir / ".backupignore"

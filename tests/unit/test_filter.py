@@ -323,7 +323,7 @@ def test_filter_matches_gitignore_behavior(project):
         profiles_path,
         include_backupignore=False,
         include_gitignore=True,
-        autodetect=True,
+        autodetect_profiles=True,
     )
     assert "python" in active_profiles
     assert "node" in active_profiles
@@ -363,7 +363,7 @@ def test_profile_detection(project):
         profiles_path,
         include_backupignore=False,
         include_gitignore=False,
-        autodetect=True,
+        autodetect_profiles=True,
     )
 
     assert "python" in active
@@ -386,13 +386,12 @@ def test_backupignore_integration(tmp_path):
         profiles,
         include_backupignore=True,
         include_gitignore=False,
-        autodetect=False,
+        autodetect_profiles=False,
     )
 
     assert any("*.key" in rule for rule in rules)
 
 
-@pytest.mark.slow
 @pytest.mark.skipif(not has_command("rsync"), reason="rsync not available")
 @pytest.mark.skipif(not has_command("git"), reason="git not available")
 def test_edge_cases_and_scale(tmp_path):
@@ -425,7 +424,7 @@ def test_edge_cases_and_scale(tmp_path):
         profiles,
         include_backupignore=False,
         include_gitignore=True,
-        autodetect=False,
+        autodetect_profiles=False,
     )
 
     rsync_files = get_rsync_files(tmp_path, filter_rules)
@@ -490,7 +489,7 @@ def test_tricky_gitignore_patterns(tmp_path):
         profiles,
         include_backupignore=False,
         include_gitignore=True,
-        autodetect=False,
+        autodetect_profiles=False,
     )
 
     rsync_files = get_rsync_files(tmp_path, filter_rules)

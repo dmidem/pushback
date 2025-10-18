@@ -48,8 +48,12 @@ pushback --server primary,offsite ~/critical
 
 ### Requirements
 
-- **Local:** Python 3.11+ (for Methods 1–2; see below), `ssh`, `rsync`
-- **Remote:** Reachable SSH server (`sshd`) with `rsync` and standard POSIX tools (`ls`, `xargs`, `basename`)
+- **Local:** Python 3.11+ (for Methods 1–2; see below), `ssh` (proper version is pre-installed on most systems), `rsync` (see below)
+  - **macOS:** Install GNU rsync via `brew install rsync` (system `openrsync` has limited functionality)
+  - **Windows:** Install rsync via `choco install rsync`, pacman/msys2, use WSL where proper GNU rsync is typically pre-installed,
+    or use any alternative method. Ensure rsync is in your PATH.
+  - **Linux:** Proper GNU rsync is typically pre-installed
+- **Remote:** SSH server (`sshd`) with `rsync` and standard POSIX tools (`ls`, `xargs`, `basename`)
 
 ### Method 1: pip
 

@@ -4,25 +4,28 @@ import hashlib
 import os
 import sys
 import tomllib
-from dataclasses import dataclass
 from datetime import datetime
 from importlib import resources
 from pathlib import Path
+from textwrap import dedent
 from typing import TypedDict
 
 from . import APP_NAME
+from .sync import SyncParams
 
 
 class OptionsDict(TypedDict):
     """Type hints for configuration options."""
 
     delete_remote: bool
+    ssh_multiplex: bool
     profiles_file: str
     snapshot_mode: str
     snapshot_custom_hours: int
     include_backupignore: bool
     include_gitignore: bool
     autodetect_profiles: bool
+    check_dependencies: bool
 
 
 class ServerEntry(TypedDict):
@@ -33,19 +36,6 @@ class ServerEntry(TypedDict):
     port: int
     base: str
     default: bool
-
-
-@dataclass(frozen=True, slots=True)
-class SyncParams:
-    """Computed sync parameters for a project root."""
-
-    root: Path
-    canonical_path: str
-    folder_name: str
-    suffix: str
-    snapshot_mode: str
-    snapshot_custom_hours: int
-    time_suffix: str
 
 
 def default_config_dir() -> Path:
@@ -63,21 +53,22 @@ DEFAULT_PROFILES_PATH = DEFAULT_CONFIG_DIR / "profiles.toml"
 
 DEFAULT_OPTIONS: OptionsDict = {
     "delete_remote": False,
+    "ssh_multiplex": True,
     "profiles_file": str(DEFAULT_PROFILES_PATH),
     "snapshot_mode": "none",
     "snapshot_custom_hours": 24,
     "include_backupignore": True,
     "include_gitignore": False,
     "autodetect_profiles": True,
+    "check_dependencies": True,
 }
 
 
 def _get_embedded_file(filename: str) -> str:
     """Get embedded default file content"""
     try:
-        import pushback._embedded
-
-        return resources.read_text(pushback._embedded, filename, encoding="utf-8")
+        pkg = f"{__package__}._embedded"
+        return resources.files(pkg).joinpath(filename).read_text(encoding="utf-8")
     except Exception:
         if filename == "config.toml":
             return _minimal_config()
@@ -88,34 +79,40 @@ def _get_embedded_file(filename: str) -> str:
 
 def _minimal_config() -> str:
     """Minimal fallback config"""
-    return f"""\
-[options]
-delete_remote = false
-profiles_file = "~/.config/{APP_NAME}/profiles.toml"
-snapshot_mode = "none"
-snapshot_custom_hours = 24
-include_backupignore = true
-include_gitignore = false
-autodetect_profiles = true
+    return dedent(
+        f"""
+        [options]
+        delete_remote = false
+        ssh_multiplex = true
+        profiles_file = "~/.config/{APP_NAME}/profiles.toml"
+        snapshot_mode = "none"
+        snapshot_custom_hours = 24
+        include_backupignore = true
+        include_gitignore = false
+        autodetect_profiles = true
+        check_dependencies = true
 
-[[server]]
-name = "main"
-user = "your_user"
-host = "your.host.example"
-port = 22
-base = "~/{APP_NAME}"
-default = true
-"""
+        [[server]]
+        name = "main"
+        user = "your_user"
+        host = "your.host.example"
+        port = 22
+        base = "~/{APP_NAME}"
+        default = true
+        """
+    )
 
 
 def _minimal_profiles() -> str:
     """Minimal fallback profiles"""
-    return """\
-[profile.safe_defaults]
-always = true
-notes = "Safe defaults"
-ignore = [".git/", ".DS_Store"]
-"""
+    return dedent(
+        """
+        [profile.safe_defaults]
+        always = true
+        notes = "Safe defaults"
+        ignore = [".git/", ".DS_Store"]
+        """
+    )
 
 
 class Config:
@@ -169,14 +166,13 @@ class Config:
             print(f"  Config:   {self.path}")
             print(f"  Profiles: {profiles_path}")
 
-    def ensure_initialized(self):
-        """Auto-create config on first run if missing"""
-        if not self.path.exists():
-            profiles_path = Path(DEFAULT_OPTIONS["profiles_file"]).expanduser()
-            if not profiles_path.exists():
-                print("First run detected. Creating default configuration...")
-                self.create_default(auto=True)
-                print()
+    def ensure_initialized(self) -> None:
+        """Ensure configuration file exists."""
+        if self.path.exists():
+            return
+        raise FileNotFoundError(
+            f"Config not found: {self.path.resolve()}. Run with --help to see how to create it."
+        )
 
     def load(self):
         """Load configuration from TOML file"""
@@ -283,6 +279,7 @@ class Config:
         """Parse options from TOML data with type conversion."""
         return {
             "delete_remote": bool(opts.get("delete_remote", DEFAULT_OPTIONS["delete_remote"])),
+            "ssh_multiplex": bool(opts.get("ssh_multiplex", DEFAULT_OPTIONS["ssh_multiplex"])),
             "profiles_file": str(opts.get("profiles_file", DEFAULT_OPTIONS["profiles_file"])),
             "snapshot_mode": str(opts.get("snapshot_mode", DEFAULT_OPTIONS["snapshot_mode"])),
             "snapshot_custom_hours": int(
@@ -296,6 +293,9 @@ class Config:
             ),
             "autodetect_profiles": bool(
                 opts.get("autodetect_profiles", DEFAULT_OPTIONS["autodetect_profiles"])
+            ),
+            "check_dependencies": bool(
+                opts.get("check_dependencies", DEFAULT_OPTIONS["check_dependencies"])
             ),
         }
 

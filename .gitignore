@@ -15,11 +15,13 @@ dist/
 *.egg-info/
 
 # Test/type/lint caches
+.cache
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 .coverage.*
+.coverage_cache
 htmlcov/
 .tox/
 .nox/

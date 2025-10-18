@@ -128,7 +128,7 @@ def build_merge_filter(
     profiles_path: Path,
     include_backupignore: bool = True,
     include_gitignore: bool = False,
-    autodetect: bool = True,
+    autodetect_profiles: bool = True,
 ) -> tuple[list[str], list[str]]:
     """Build complete rsync filter from profiles and ignore files."""
     profiles = _load_profiles(profiles_path)
@@ -138,7 +138,7 @@ def build_merge_filter(
     for name, config in profiles.items():
         if config.get("always", False):
             active.append(name)
-        elif autodetect and "detect" in config:
+        elif autodetect_profiles and "detect" in config:
             if _matches_detection_rules(config["detect"], project_root):
                 active.append(name)
 

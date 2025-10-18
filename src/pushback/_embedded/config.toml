@@ -3,6 +3,7 @@
 
 [options]
 delete_remote = false
+multiplex = true
 profiles_file = "~/.config/pushback/profiles.toml"
 snapshot_mode = "none"
 snapshot_custom_hours = 24

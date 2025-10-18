@@ -3,28 +3,36 @@
 """Development task runner for pushback."""
 
 import inspect
+import json
 import os
 import platform
 import shutil
 import subprocess
 import sys
 import tarfile
-import textwrap
 import tomllib
 import zipfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from textwrap import dedent
 from typing import NoReturn
 
 # Expected project name (validated against pyproject.toml on startup)
 PROJECT_NAME = "pushback"
 
-DEV_SCRIPT = "dev.py"
 DIST = Path("dist")
 META_FILE = Path(f"src/{PROJECT_NAME}/_meta.py")
+DEV_SCRIPT_FILE = Path(__file__).name if "__file__" in globals() else "python"
+DEV_SCRIPT = Path(sys.argv[0]).name if sys.argv[0] else DEV_SCRIPT_FILE
+DEV_SCRIPT_REAL_FILE = Path(os.path.realpath(__file__)).name
 
 # Global project config loaded in main()
-data: dict = {}
+project_config: dict = {}
+
+
+def esc(s: str | None) -> str:
+    """JSON-escape a string (quotes/newlines, etc.), without the surrounding quotes."""
+    return json.dumps(s or "")[1:-1]
 
 
 def fail(msg: str, code: int = 1) -> NoReturn:
@@ -45,10 +53,7 @@ def load_project_config() -> dict:
     actual_name = config.get("project", {}).get("name", "")
 
     if actual_name != PROJECT_NAME:
-        fail(
-            f"pyproject.toml defines project.name='{actual_name}' "
-            f"but {DEV_SCRIPT} expects '{PROJECT_NAME}'"
-        )
+        fail(f"pyproject.toml defines project.name='{actual_name}' but '{PROJECT_NAME}' expected")
 
     return config
 
@@ -67,29 +72,51 @@ def run_checked(*args: str, cwd: Path | None = None) -> None:
 
 
 def _get_min_python() -> str:
-    """Gets lowest MAJOR.MINOR from a spec like '>=3.11,<4,!=3.12.*'."""
-    project = data["project"]
-    spec = project["requires-python"]
-    for clause in (c.strip() for c in spec.split(",")):
-        if clause.startswith(">=") or clause.startswith("=="):
-            ver = clause[2:].strip()  # drop operator
-            parts = ver.split(".")
-            if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
-                return f"{parts[0]}.{parts[1]}"
-            break
-    fail(f"cannot derive MIN_PYTHON from requires-python: {spec!r}")
+    """Gets lowest MAJOR.MINOR from a spec like '>=3.11,<4,!=3.12.*' (best effort)."""
+    spec = (project_config.get("project") or {}).get("requires-python") or ""
+    if spec:
+        for clause in (c.strip() for c in spec.split(",")):
+            if clause.startswith(">=") or clause.startswith("=="):
+                ver = clause[2:].strip()  # drop operator
+                parts = ver.split(".")
+                if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+                    return f"{parts[0]}.{parts[1]}"
+                break
+    return "3.8"
 
 
 def build_meta_content() -> str:
     """Build the content of project metadata file."""
-    project = data["project"]
-    return textwrap.dedent(f"""\
-        # Auto-generated from pyproject.toml by `{DEV_SCRIPT} emit-meta` - do not edit manually.
+    project = project_config.get("project") or {}
+    description = project.get("description") or ""
+    version = str(project.get("version") or "")
 
-        APP_NAME = "{PROJECT_NAME}"
-        VERSION = "{project["version"]}"
-        MIN_PYTHON = "{_get_min_python()}"
-        """)
+    license = project.get("license")
+    license_text = ""
+    if isinstance(license, str):
+        license_text = license
+    elif isinstance(license, dict):
+        if "text" in license:
+            license_text = license.get("text") or ""
+        elif "file" in license:
+            try:
+                license_text = Path(license["file"]).read_text(encoding="utf-8")
+            except Exception:
+                pass
+
+    urls = project.get("urls") or {}
+    homepage = urls.get("Homepage") or urls.get("Documentation") or urls.get("Repository") or ""
+
+    return dedent(f"""\
+        # Auto-generated from pyproject.toml by `{DEV_SCRIPT_REAL_FILE} emit-meta` - do not edit manually.
+
+        APP_NAME = "{esc(PROJECT_NAME)}"
+        APP_DESCRIPTION = "{esc(description)}"
+        VERSION = "{esc(version)}"
+        LICENSE = "{esc(license_text)}"
+        HOMEPAGE = "{esc(homepage)}"
+        MIN_PYTHON = "{esc(_get_min_python())}"
+        """)  # noqa
 
 
 def emit_meta():
@@ -121,8 +148,20 @@ def check_meta():
     return 0
 
 
-def check():
-    """Format check + lint + typecheck + test"""
+def fix():
+    """Format + auto-fix"""
+    return run("uv", "run", "ruff", "format", "src/", "tests/", "scripts/") or run(
+        "uv", "run", "ruff", "check", "--fix", "src/", "tests/", "scripts/"
+    )
+
+
+def test_slow() -> int:
+    """Run only slow tests"""
+    return run("uv", "run", "pytest", f"--cov={PROJECT_NAME}", "--cov-report=xml", "-m", "slow")
+
+
+def check() -> int:
+    """Format check + lint + typecheck + test (exclude slow tests)"""
     hint = ""
 
     if check_meta() != 0:
@@ -130,8 +169,8 @@ def check():
     else:
         mypy_version = _get_min_python()
 
-        rc = run("uv", "run", "ruff", "format", "--check", "src/", "tests/", DEV_SCRIPT) or run(
-            "uv", "run", "ruff", "check", "src/", "tests/", DEV_SCRIPT
+        rc = run("uv", "run", "ruff", "format", "--check", "src/", "tests/", "scripts/") or run(
+            "uv", "run", "ruff", "check", "src/", "tests/", "scripts/"
         )
 
         if rc != 0:
@@ -144,8 +183,16 @@ def check():
                 f"--python-version={mypy_version}",
                 "src/",
                 "tests/",
-                DEV_SCRIPT,
-            ) or run("uv", "run", "pytest", f"--cov={PROJECT_NAME}", "--cov-report=xml")
+                "scripts/",
+            ) or run(
+                "uv",
+                "run",
+                "pytest",
+                f"--cov={PROJECT_NAME}",
+                "--cov-report=xml",
+                "-m",
+                "not slow",
+            )
 
     if rc != 0:
         print(f"\n✗ Checks failed{hint}.", file=sys.stderr)
@@ -155,11 +202,12 @@ def check():
     return 0
 
 
-def fix():
-    """Format + auto-fix"""
-    return run("uv", "run", "ruff", "format", "src/", "tests/", DEV_SCRIPT) or run(
-        "uv", "run", "ruff", "check", "--fix", "src/", "tests/", DEV_SCRIPT
-    )
+def check_all() -> int:
+    """Run full checks (including slow tests)."""
+    rc = check()
+    if rc != 0:
+        return rc
+    return test_slow()
 
 
 def inspect_built_artifacts(
@@ -351,7 +399,8 @@ def build_standalone():
     size_mb = bin_path.stat().st_size / 1024 / 1024
     print(f"\n✓ Created: {bin_path} ({size_mb:.2f} MB)", file=sys.stderr)
 
-    version = data["project"]["version"]
+    project = project_config.get("project") or {}
+    version = str(project.get("version") or "")
     try:
         archives = package_binary(DIST, version)
     except FileNotFoundError as exc:
@@ -372,9 +421,11 @@ def clean():
         "*.egg-info",
         "**/__pycache__",
         "**/*.pyc",
+        ".cache",
         ".pytest_cache",
         ".mypy_cache",
         ".ruff_cache",
+        ".coverage_cache",
         ".coverage",
         "coverage.xml",
         "htmlcov",
@@ -403,27 +454,36 @@ Task = Callable[[], int]
 
 def print_usage(tasks: Mapping[str, Task]) -> None:
     names = "|".join(sorted(tasks))
-    print(f"Usage: python {DEV_SCRIPT} {{{names}}}", file=sys.stderr)
-    for name in sorted(tasks):
+    print(f"Usage: {DEV_SCRIPT} {{{names}}}", file=sys.stderr)
+
+    width = max(len(name) for name in tasks) + 2
+    for name in tasks:
         func = tasks[name]
         doc = inspect.getdoc(func) or ""
         first = doc.strip().splitlines()[0] if doc else ""
         if first:
-            print(f"  {name:<17} {first}", file=sys.stderr)
+            print(f"  {name:<{width}}{first}", file=sys.stderr)
+
+    print(
+        "\nRun from the project root folder, i.e. where pyproject.toml is located!\n",
+        file=sys.stderr,
+    )
 
 
 def main() -> int:
-    global data
-    data = load_project_config()
+    global project_config
+    project_config = load_project_config()
 
     tasks: dict[str, Task] = {
+        "emit-meta": emit_meta,
+        "check-meta": check_meta,
+        "fix": fix,
+        "check": check,
+        "test-slow": test_slow,
+        "check-all": check_all,
         "build": build,
         "build-standalone": build_standalone,
-        "check": check,
-        "check-meta": check_meta,
         "clean": clean,
-        "emit-meta": emit_meta,
-        "fix": fix,
     }
 
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help", "help"}:

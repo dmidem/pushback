@@ -3,20 +3,28 @@
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from .filter import build_merge_filter
 from .remote import RemoteManager
 
-if TYPE_CHECKING:
-    from pushback.config import SyncParams
+
+@dataclass(frozen=True, slots=True)
+class SyncParams:
+    """Computed sync parameters for a project root."""
+
+    root: Path
+    canonical_path: str
+    folder_name: str
+    suffix: str
+    snapshot_mode: str
+    snapshot_custom_hours: int
+    time_suffix: str
 
 
 @dataclass
@@ -50,42 +58,6 @@ class SyncContext:
         return f"{self.remote.base.rstrip('/')}/{self.base_remote_name}{self.time_suffix}"
 
 
-_RSYNC_BINARY = None
-
-
-def find_best_rsync() -> str:
-    """
-    Find the best rsync binary to use.
-    On macOS, prefer Homebrew's GNU rsync over system openrsync.
-    """
-    candidates = [
-        "/opt/homebrew/bin/rsync",
-        "/usr/local/bin/rsync",
-        shutil.which("rsync"),
-    ]
-
-    for exe in candidates:
-        if not exe:
-            continue
-        try:
-            out = subprocess.check_output([exe, "--version"], text=True, errors="ignore")
-        except Exception:
-            continue
-        if "openrsync" not in out.lower():
-            return exe
-
-    # Fall back to whatever is available (may be openrsync)
-    return shutil.which("rsync") or "rsync"
-
-
-def get_rsync_binary() -> str:
-    """Get the rsync binary path to use."""
-    global _RSYNC_BINARY
-    if _RSYNC_BINARY is None:
-        _RSYNC_BINARY = find_best_rsync()
-    return _RSYNC_BINARY
-
-
 def sync_to_server(
     server_name: str,
     server_config,
@@ -101,7 +73,7 @@ def sync_to_server(
         print(exc, file=sys.stderr)
         return 2
 
-    remote_mgr = remote_mgr or RemoteManager(not args.no_multiplex)
+    remote_mgr = remote_mgr or RemoteManager(args.ssh_multiplex)
 
     ctx = SyncContext(
         root=sync_params.root,
@@ -274,23 +246,9 @@ def _build_filter(root: Path, config, args, verbose: bool) -> str | None:
     if verbose:
         print(f"Loading profiles: {profiles_path}")
 
-    include_backupignore = config.options["include_backupignore"]
-    if args.include_backupignore:
-        include_backupignore = True
-    elif args.no_backupignore:
-        include_backupignore = False
-
-    include_gitignore = config.options["include_gitignore"]
-    if args.include_gitignore:
-        include_gitignore = True
-    elif args.no_gitignore:
-        include_gitignore = False
-
-    autodetect = config.options["autodetect_profiles"]
-    if args.autodetect_profiles:
-        autodetect = True
-    elif args.no_autodetect:
-        autodetect = False
+    include_backupignore = args.include_backupignore
+    include_gitignore = args.include_gitignore
+    autodetect_profiles = args.autodetect_profiles
 
     try:
         filter_rules, active_profiles = build_merge_filter(
@@ -298,7 +256,7 @@ def _build_filter(root: Path, config, args, verbose: bool) -> str | None:
             profiles_path,
             include_backupignore=include_backupignore,
             include_gitignore=include_gitignore,
-            autodetect=autodetect,
+            autodetect_profiles=autodetect_profiles,
         )
 
         if verbose:
@@ -354,10 +312,8 @@ def _run_rsync(ctx: SyncContext, target: str, filter_path: str, args, config) ->
     filt = rsync_friendly_path(Path(filter_path))
     ssh_opts = shlex.join(ctx.remote_mgr.ssh_opts(ctx.remote.port))
 
-    rsync = get_rsync_binary()
-
     rsync_cmd = [
-        rsync,
+        "rsync",
         "-azP",
         "--safe-links",
         "--prune-empty-dirs",
@@ -367,12 +323,7 @@ def _run_rsync(ctx: SyncContext, target: str, filter_path: str, args, config) ->
         f"ssh {ssh_opts}",
     ]
 
-    delete_remote = config.options["delete_remote"]
-    if args.delete:
-        delete_remote = True
-    elif args.no_delete:
-        delete_remote = False
-
+    delete_remote = args.delete
     if delete_remote:
         rsync_cmd.insert(1, "--delete")
 

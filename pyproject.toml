@@ -1,7 +1,7 @@
 [project]
 name = "pushback"
 version = "0.1.0"
-description = "SSH/rsync-based backup tool with gitignore-style filtering"
+description = "SSH/rsync-based backup tool with advanced features."
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = { text = "MIT OR Apache-2.0" }
@@ -22,7 +22,6 @@ classifiers = [
   "Typing :: Typed",
   "Topic :: System :: Archiving :: Backup",
 ]
-dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/dmidem/pushback"
@@ -32,7 +31,7 @@ Issues = "https://github.com/dmidem/pushback/issues"
 [project.scripts]
 pushback = "pushback.cli:main"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "mypy>=1.18.2",
   "pytest>=8.4.2",
@@ -69,6 +68,7 @@ only-include = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+cache-dir = ".cache/ruff"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
@@ -79,6 +79,7 @@ warn_return_any = true
 warn_unused_configs = true
 check_untyped_defs = true
 mypy_path = ["src"]
+cache_dir = ".cache/mypy"
 
 # ---- Testing ----
 [tool.pytest.ini_options]
@@ -87,8 +88,15 @@ addopts = "-v --strict-markers"
 markers = [
   "slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]
+cache_dir = ".cache/pytest"
 
 # Coverage points at the installed package name (preferred for src-layout)
 [tool.coverage.run]
 source = ["pushback"]
+data_file = ".cache/coverage/.coverage"
 
+[tool.coverage.xml]
+output = ".cache/coverage/coverage.xml"
+
+[tool.coverage.html]
+directory = ".cache/coverage/htmlcov"
