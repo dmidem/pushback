@@ -98,21 +98,11 @@ and place the `pushback` binary somewhere on your `PATH` (for example, `/usr/loc
 
 ## Features
 
+- **Smart filtering** — gitignore-style patterns with re-includes
+- **Profile auto-detection** — Python, Node.js, Rust projects recognized automatically
 - **Multi-server backups** — `--server work,offsite`
 - **Collision-safe paths** — `<base>/<name>_<hash>[_<time>]`
 - **Time-based snapshots** — `none|hourly|daily|weekly|monthly|yearly|custom`
-- **Smart filtering** — gitignore-style patterns with re-includes
-- **Profile auto-detection** — Python, Node.js, Rust projects recognized automatically
-- **SSH multiplexing** — fewer password prompts
-- **Single-file install** — just Python + rsync/ssh
-
-### Why pushback vs raw rsync?
-
-You *can* script rsync yourself, but you'll quickly rebuild:
-- Collision handling for same-named projects
-- Snapshot naming/rotation that stays consistent
-- Gitignore-style pattern matching with re-include semantics
-- Profile-based filtering (auto-detect Python/Node/Rust/etc. projects)
 
 ## How It Works
 
@@ -281,18 +271,33 @@ uv run mypy src/ tests/
 uv run pytest
 uv build
 
-# Option 2: Use dev.py (recommended for common workflows)
-python dev.py check   # Lint + typecheck + test
-python dev.py fix     # Format + auto-fix
-python dev.py build   # Build distributions
-python dev.py clean   # Remove artifacts
+### Option 2: Use bootstrap.sh and dev script (more convenient)
+
+```bash
+./bootstrap.sh
+source .venv/bin/activate
+```
+
+This installs dependencies, creates a `dev` symlink to `scripts/dev.py`, and configures the virtual environment.
+
+Once activated, use the dev command (run `dev` or `scripts/dev.py` to see a full list of available commands):
+
+```bash
+dev fix           # Format + auto-fix
+dev check         # Lint + typecheck + test
+dev test-slow     # Optionally, if you have docker: run docker-based integration tests
+dev build         # Build distributions
+dev clean         # Remove artifacts
 ```
 
 ### Project Structure
 
 ```
 pushback/
-├── src/pushback/        # Main package
+├── scripts/            # Development and CI helper scripts
+│   ├── dev.py          # Development task runner
+│   └── ...
+├── src/pushback/       # Main package
 │   ├── cli.py          # CLI entry point
 │   ├── config.py       # Configuration handling
 │   ├── sync.py         # Rsync operations
@@ -302,7 +307,8 @@ pushback/
 │       ├── config.toml
 │       └── profiles.toml
 ├── tests/              # Test suite
-└── dev.py              # Development tasks
+├── bootstrap.sh        # Development environment setup
+└── ...                 # Docs, configs, licenses, etc.
 ```
 
 ### CI/CD Workflow
@@ -311,14 +317,15 @@ pushback uses GitHub Actions for automated testing and releases (see `.github/wo
 
 **Continuous Integration (`ci.yml`):**
 - Runs on every push and pull request
-- Performs linting, type checking, and formatting validation with `ruff`
-- Runs test suite with `pytest`
+- Performs linting, type checking, and formatting validation with
+- Runs test suite with
 - Verifies builds complete successfully
 
 **Automated Releases (`release.yml`):**
 - Triggered when a version tag (e.g., `v0.2.0`) is pushed to the `main` branch
 - Runs the same CI checks to ensure quality
-- Builds wheel, source distribution, and zipapp
+- Builds wheel, source distribution, zipapp, and pre-compiled binaries (with PyInstaller) for Linux, macOS,
+  and Windows
 - Creates a GitHub release with all artifacts attached
 
 **Note:** Only tags pushed to `main` trigger releases. Tags on other branches are ignored.
