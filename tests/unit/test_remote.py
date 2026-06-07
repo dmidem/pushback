@@ -6,7 +6,6 @@ import pytest
 
 from pushback.remote import RemoteManager
 
-
 # ---------------------------------------------------------------------------
 # ssh_opts — multiplexing behaviour
 # ---------------------------------------------------------------------------

@@ -137,17 +137,17 @@ pushback --min-size 1K ~/logs
 
 ### Use .gitignore instead of .backupignore
 ```bash
-pushback --include-gitignore --no-backupignore .
+pushback -g --no-include-backupignore .
 ```
 
 ### Combine all filter sources
 ```bash
-pushback --include-backupignore --include-gitignore --autodetect-profiles .
+pushback -b -g --autodetect-profiles .
 ```
 
 ### Disable profile auto-detection (manual only)
 ```bash
-pushback --no-autodetect .
+pushback --no-autodetect-profiles .
 ```
 
 ---
@@ -375,13 +375,13 @@ pushback --dry-run --verbose . | grep -A 20 "Active profiles"
 ### Test specific filter configuration
 ```bash
 # Disable all filters
-pushback --no-backupignore --no-gitignore --no-autodetect --dry-run .
+pushback --no-include-backupignore --no-include-gitignore --no-autodetect-profiles --dry-run .
 
 # Only profiles
-pushback --no-backupignore --no-gitignore --dry-run .
+pushback --no-include-backupignore --no-include-gitignore --dry-run .
 
 # Only .backupignore
-pushback --no-autodetect --dry-run .
+pushback --no-autodetect-profiles --dry-run .
 ```
 
 ### Debug SSH connection

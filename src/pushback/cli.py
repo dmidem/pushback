@@ -172,6 +172,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Delete remote files not present locally (use --no-delete to disable).",
     )
     parser.add_argument(
+        "-b",
         "--include-backupignore",
         dest="include_backupignore",
         action=argparse.BooleanOptionalAction,
@@ -179,6 +180,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include .backupignore rules (use --no-include-backupignore to disable).",
     )
     parser.add_argument(
+        "-g",
         "--include-gitignore",
         dest="include_gitignore",
         action=argparse.BooleanOptionalAction,

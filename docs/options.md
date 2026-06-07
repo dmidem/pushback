@@ -174,7 +174,7 @@ snapshot_custom_hours = 6  # 6-hour intervals
 #### `include_backupignore`
 - **Type:** boolean
 - **Default:** `true`
-- **CLI override:** `--include-backupignore` or `--no-backupignore`
+- **CLI override:** `-b` / `--include-backupignore` or `--no-include-backupignore`
 
 Include `.backupignore` file from project root (gitignore syntax).
 
@@ -186,7 +186,7 @@ include_backupignore = true
 #### `include_gitignore`
 - **Type:** boolean
 - **Default:** `false`
-- **CLI override:** `--include-gitignore` or `--no-gitignore`
+- **CLI override:** `-g` / `--include-gitignore` or `--no-include-gitignore`
 
 Include `.gitignore` file from project root.
 
@@ -198,7 +198,7 @@ include_gitignore = true  # Use .gitignore instead of .backupignore
 #### `autodetect_profiles`
 - **Type:** boolean
 - **Default:** `true`
-- **CLI override:** `--autodetect-profiles` or `--no-autodetect`
+- **CLI override:** `--autodetect-profiles` or `--no-autodetect-profiles`
 
 Auto-detect project type and activate matching profiles.
 
