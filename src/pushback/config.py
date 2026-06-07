@@ -18,7 +18,7 @@ class OptionsDict(TypedDict):
     """Type hints for configuration options."""
 
     delete_remote: bool
-    ssh_multiplex: bool
+    ssh_multiplex: int
     profiles_file: str
     snapshot_mode: str
     snapshot_custom_hours: int
@@ -53,7 +53,7 @@ DEFAULT_PROFILES_PATH = DEFAULT_CONFIG_DIR / "profiles.toml"
 
 DEFAULT_OPTIONS: OptionsDict = {
     "delete_remote": False,
-    "ssh_multiplex": True,
+    "ssh_multiplex": 3,
     "profiles_file": str(DEFAULT_PROFILES_PATH),
     "snapshot_mode": "none",
     "snapshot_custom_hours": 24,
@@ -83,7 +83,7 @@ def _minimal_config() -> str:
         f"""
         [options]
         delete_remote = false
-        ssh_multiplex = true
+        ssh_multiplex = 3
         profiles_file = "~/.config/{APP_NAME}/profiles.toml"
         snapshot_mode = "none"
         snapshot_custom_hours = 24
@@ -113,6 +113,18 @@ def _minimal_profiles() -> str:
         ignore = [".git/", ".DS_Store"]
         """
     )
+
+
+def _parse_ssh_multiplex(raw) -> int:
+    """Parse ssh_multiplex value with backwards-compatibility for legacy booleans.
+
+    True  → 60 s (legacy default)
+    False → 0   (disabled)
+    int   → used as ControlPersist timeout in seconds
+    """
+    if isinstance(raw, bool):
+        return 60 if raw else 0
+    return int(raw)
 
 
 class Config:
@@ -279,7 +291,9 @@ class Config:
         """Parse options from TOML data with type conversion."""
         return {
             "delete_remote": bool(opts.get("delete_remote", DEFAULT_OPTIONS["delete_remote"])),
-            "ssh_multiplex": bool(opts.get("ssh_multiplex", DEFAULT_OPTIONS["ssh_multiplex"])),
+            "ssh_multiplex": _parse_ssh_multiplex(
+                opts.get("ssh_multiplex", DEFAULT_OPTIONS["ssh_multiplex"])
+            ),
             "profiles_file": str(opts.get("profiles_file", DEFAULT_OPTIONS["profiles_file"])),
             "snapshot_mode": str(opts.get("snapshot_mode", DEFAULT_OPTIONS["snapshot_mode"])),
             "snapshot_custom_hours": int(

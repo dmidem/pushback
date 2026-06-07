@@ -24,7 +24,7 @@ pushback --init-config
 ```toml
 [options]
 delete_remote = false
-multiplex = true
+ssh_multiplex = 3
 profiles_file = "~/.config/pushback/profiles.toml"
 snapshot_mode = "none"
 snapshot_custom_hours = 24
@@ -46,7 +46,7 @@ default = true
 ```toml
 [options]
 delete_remote = false
-multiplex = true
+ssh_multiplex = 3
 profiles_file = "~/.config/pushback/profiles.toml"
 snapshot_mode = "daily"
 snapshot_custom_hours = 24
@@ -92,20 +92,32 @@ delete_remote = false  # Safe default
 ```
 
 #### `ssh_multiplex`
-- **Type:** boolean  
-- **Default:** `true`  
-- **CLI:** `--ssh-multiplex` / `--no-ssh-multiplex`
+- **Type:** integer (seconds)
+- **Default:** `1`
+- **CLI:** `--ssh-multiplex SECONDS`
 
-Enable SSH connection sharing (OpenSSH ControlMaster/ControlPersist).
+SSH ControlPersist timeout in seconds. Controls how long the SSH multiplexer master process stays alive
+after the last connection closes.
+
+| Value | Behaviour |
+|-------|-----------|
+| `0`   | Multiplexing **disabled** entirely (no ControlMaster/ControlPath options passed) |
+| `1`   | **Default** — multiplexing enabled, master exits after 1 s of inactivity. Safe for YubiKey/FIDO2 hardware keys because the OS credential cache is not held open between invocations. |
+| `> 1` | Multiplexing enabled, master stays alive for that many seconds; e.g. `60` keeps the connection open for 60 s, avoiding re-authentication across a shell script that calls `pushback` multiple times. |
+
+**Backwards-compatibility:** existing configs that set `ssh_multiplex = true` are accepted and treated as
+`60`; `ssh_multiplex = false` is treated as `0`.
 
 **Why (for this app):** avoids repeated SSH password/passphrase prompts across multiple SSH/rsync steps and
 across sequential `pushback` invocations in shell scripts; also speeds things up by reusing the same connection.
 
-**Notes:** works on most Unix-like OpenSSH clients; disable on platforms where ControlMaster is unreliable.
+**Notes:** works on most Unix-like OpenSSH clients; set to `0` on platforms where ControlMaster is unreliable.
 
 **Example:**
 ```toml
-multiplex = true
+ssh_multiplex = 3    # default caching (hardware-key safe)
+# ssh_multiplex = 60   # keep master alive for 60 s (legacy equivalent of true)
+# ssh_multiplex = 0    # disable multiplexing entirely
 ```
 
 #### `profiles_file`
@@ -503,7 +515,7 @@ These flags use “yes/no” pairs; if neither is provided, the **config** value
 
 | Option | Description |
 |--------|-------------|
-| `--ssh-multiplex` / `--no-ssh-multiplex` | Enable / disable SSH connection sharing (ControlMaster). |
+| `--ssh-multiplex SECONDS` | SSH ControlPersist timeout in seconds (`0` disables multiplexing). |
 | `--check-dependencies` / `--no-check-dependencies` | Enable / skip rsync/ssh compatibility checks. |
 | `-d, --delete` / `--no-delete` | Delete remote files not present locally. |
 

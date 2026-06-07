@@ -67,7 +67,7 @@ def test_env(tmp_path):
         min_size=None,
         stats=False,
         rsync_extra="",
-        no_multiplex=True,
+        ssh_multiplex=0,
         force_all=False,
         force_collision_new=False,
         force_collision_update=False,

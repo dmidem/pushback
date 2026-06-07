@@ -11,13 +11,13 @@ from . import APP_NAME
 class RemoteManager:
     """Manage remote server operations"""
 
-    def __init__(self, ssh_multiplex: bool = True):
+    def __init__(self, ssh_multiplex: int = 3):
         """Initialize remote manager"""
         self.ssh_multiplex = ssh_multiplex
 
     def ssh_opts(self, port: int) -> list[str]:
         """Build SSH options"""
-        if not self.ssh_multiplex:
+        if self.ssh_multiplex <= 0:
             return ["-p", str(port)]
 
         control_path = str(Path.home() / f".ssh/{APP_NAME}-%r@%h-%p")
@@ -29,7 +29,7 @@ class RemoteManager:
             "-o",
             f"ControlPath={control_path}",
             "-o",
-            "ControlPersist=60",
+            f"ControlPersist={self.ssh_multiplex}",
         ]
 
     def run_ssh(self, user: str, host: str, port: int, script: str) -> str:

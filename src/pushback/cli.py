@@ -195,9 +195,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ssh-multiplex",
         dest="ssh_multiplex",
-        action=argparse.BooleanOptionalAction,
+        type=int,
+        metavar="SECONDS",
         default=None,
-        help="Enable SSH connection sharing (use --no-ssh-multiplex to disable).",
+        help=(
+            "SSH ControlPersist timeout in seconds (0 disables multiplexing). "
+            "If omitted, the value from the configuration file is used (or default 3)."
+        ),
     )
     parser.add_argument(
         "--check-dependencies",
@@ -253,6 +257,10 @@ def resolve_bool(cli_value: bool | None, cfg_value: bool) -> bool:
     return cfg_value if cli_value is None else cli_value
 
 
+def resolve_int(cli_value: int | None, cfg_value: int) -> int:
+    return cfg_value if cli_value is None else cli_value
+
+
 def main():
     """Main entry point"""
     parser = build_parser()
@@ -292,7 +300,7 @@ def main():
         args.autodetect_profiles, config.options["autodetect_profiles"]
     )
     args.delete = resolve_bool(args.delete, config.options["delete_remote"])
-    args.ssh_multiplex = resolve_bool(args.ssh_multiplex, config.options["ssh_multiplex"])
+    args.ssh_multiplex = resolve_int(args.ssh_multiplex, config.options["ssh_multiplex"])
     args.check_dependencies = resolve_bool(
         args.check_dependencies, config.options["check_dependencies"]
     )
